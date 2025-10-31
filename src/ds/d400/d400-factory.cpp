@@ -1044,10 +1044,13 @@ namespace librealsense
 
     std::shared_ptr< device_interface > d400_info::create_device()
     {
+        printf("NKW %s %d enter here\n", __FUNCTION__, __LINE__);
         using namespace ds;
 
-        if( _group.uvc_devices.empty() )
+        if( _group.uvc_devices.empty() ) {
+            printf("NKW %s %d Depth Camera not found!\n", __FUNCTION__, __LINE__);
             throw std::runtime_error("Depth Camera not found!");
+        }
 
         auto const dev_info = std::dynamic_pointer_cast< const d400_info >( shared_from_this() );
         bool const register_device_notifications = true;
@@ -1093,8 +1096,10 @@ namespace librealsense
         case RS455_PID:
             return std::make_shared< rs455_device >( dev_info, register_device_notifications );
         case RS457_PID:
-            return std::make_shared< rs457_device >( dev_info, register_device_notifications );
+            printf("NKW %s %d RS457_PID found!\n", __FUNCTION__, __LINE__);
+            return std::make_shared< rs457_device >( dev_info, register_device_notifications ); // enter here
         default:
+            printf("NKW %s %d Unsupported RS400 model!\n", __FUNCTION__, __LINE__);
             throw std::runtime_error( rsutils::string::from() << "Unsupported RS400 model! 0x" << std::hex
                                                               << std::setw( 4 ) << std::setfill( '0' ) << (int)pid );
         }

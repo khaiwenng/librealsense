@@ -420,11 +420,11 @@ namespace rs2
         */
         pipeline_profile start(const config& config)
         {
+            //never here
             rs2_error* e = nullptr;
             auto p = std::shared_ptr<rs2_pipeline_profile>(
                 rs2_pipeline_start_with_config(_pipeline.get(), config.get().get(), &e),
                 rs2_delete_pipeline_profile);
-
             error::handle(e);
             return pipeline_profile(p);
         }

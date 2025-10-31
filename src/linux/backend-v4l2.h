@@ -63,7 +63,7 @@ constexpr bool metadata_node = false;
 #define V4L2_META_FMT_D4XX      v4l2_fourcc('D', '4', 'X', 'X') /* D400 Payload Header metadata */
 #endif
 
-#undef DEBUG_V4L
+//#undef DEBUG_V4L
 #ifdef DEBUG_V4L
 #define LOG_DEBUG_V4L(...)   do { CLOG(DEBUG   ,LIBREALSENSE_ELPP_ID) << __VA_ARGS__; } while(false)
 #else
@@ -109,6 +109,7 @@ namespace librealsense
             void release();
 
             std::string _device_path;
+            std::string _subdevice_path;
             uint32_t _timeout;
             int _fildes;
             static std::recursive_mutex _init_mutex;
@@ -318,6 +319,7 @@ namespace librealsense
                                        const std::string&)> action);
 
             static std::vector<std::string> get_video_paths();
+            static std::vector<std::string> get_subdevice_paths();
 
             static bool is_usb_path_valid(const std::string& usb_video_path, const std::string &dev_name,
                                           std::string &busnum, std::string &devnum, std::string &devpath);
@@ -331,7 +333,7 @@ namespace librealsense
             static void get_mipi_device_info(const std::string& dev_name,
                                              std::string& bus_info, std::string& card);
 
-            v4l_uvc_device(const uvc_device_info& info, bool use_memory_map = false);
+            v4l_uvc_device(const uvc_device_info& info, bool use_memory_map = true);//NKW mmap
 
             virtual ~v4l_uvc_device() override;
 
@@ -365,12 +367,14 @@ namespace librealsense
 
             control_range get_pu_range(rs2_option option) const override;
 
+            uint32_t mbus_code_to_fourcc(uint32_t mbus_code) const;
             std::vector<stream_profile> get_profiles() const override;
 
             void lock() const override;
             void unlock() const override;
 
             std::string get_device_location() const override { return _device_path; }
+            std::string get_subdevice_location() const override { return _subdevice_path; }
             usb_spec get_usb_specification() const override { return _device_usb_spec; }
 
             bool is_platform_jetson() const override {return false;}
@@ -406,7 +410,9 @@ namespace librealsense
 
             power_state _state = D3;
             std::string _name = "";
+            std::string _subdev_name = "";
             std::string _device_path = "";
+            std::string _subdevice_path = "";
             usb_spec _device_usb_spec = usb_undefined;
             uvc_device_info _info;
 
@@ -429,6 +435,7 @@ namespace librealsense
             std::vector<int>  _fds;             // list the file descriptors to be monitored during frames polling
             buffers_mgr     _buf_dispatch;      // Holder for partial (MD only) frames that shall be preserved between 'select' calls when polling v4l buffers
             int _fd = 0;
+            int _sub_fd = 0;
             frame_drop_monitor _frame_drop_monitor;           // used to check the frames drops kpi
             v4l2_video_md_syncer _video_md_syncer;
 
@@ -459,7 +466,7 @@ namespace librealsense
             void prepare_capture_buffers();
             virtual void acquire_metadata(buffers_mgr & buf_mgr,fd_set &fds, bool compressed_format=false);
             // checking if metadata is streamed
-            virtual inline bool is_metadata_streamed() const { return _md_fd > 0;}
+            virtual inline bool is_metadata_streamed() const { printf("NKW %s _md_fd = %d\n", __FUNCTION__, _md_fd); return _md_fd > 0;}
             virtual inline std::shared_ptr<buffer> get_md_buffer(__u32 index) const {return _md_buffers[index];}
             int _md_fd = -1;
             std::string _md_name = "";

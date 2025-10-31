@@ -147,10 +147,13 @@ namespace librealsense
 
         void open(const stream_profiles& requests) override
         {
+            printf("NKW stream_profiles::%s %d opening streams\n", __FUNCTION__, __LINE__);
             group_multiple_fw_calls(*this, [&]() {
+                printf("NKW stream_profiles::%s calling query\n", __FUNCTION__, __LINE__);
                 _depth_units = get_option(RS2_OPTION_DEPTH_UNITS).query();
-                set_frame_metadata_modifier([&](frame_additional_data& data) {data.depth_units = _depth_units.load(); });
 
+                set_frame_metadata_modifier([&](frame_additional_data& data) {data.depth_units = _depth_units.load(); });
+                printf("NKW stream_profiles::%s %d calling synthetic_sensor::open\n", __FUNCTION__, __LINE__);
                 synthetic_sensor::open(requests);
                 }); //group_multiple_fw_calls
         }

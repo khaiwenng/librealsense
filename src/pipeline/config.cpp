@@ -19,6 +19,7 @@ namespace librealsense
         }
         void config::enable_stream(rs2_stream stream, int index, uint32_t width, uint32_t height, rs2_format format, uint32_t fps)
         {
+            printf("NKW config::%s %d enter here\n", __FUNCTION__, __LINE__);
             std::lock_guard<std::mutex> lock(_mtx);
             _resolved_profile.reset();
             _stream_requests[{stream, index}] = { format, stream, index, width, height, fps };
@@ -142,10 +143,12 @@ namespace librealsense
         {
             util::config config;
             util::config filtered_config;
-
+            printf("NKW %s %d enter here\n", __FUNCTION__, __LINE__);
             //if the user requested all streams
             if (_enable_all_streams)
             {
+                // NKW not here
+                printf("NKW %s %d _enable_all_streams is enabled\n", __FUNCTION__, __LINE__);
                 stream_profiles profiles;
                 for (size_t i = 0; i < dev->get_sensors_count(); ++i)
                 {
@@ -160,6 +163,8 @@ namespace librealsense
             //If the user did not request anything, give it the default, on playback all recorded streams are marked as default.
             if (_stream_requests.empty())
             {
+                // NKW not here
+                printf("NKW %s %d no stream requests, getting default configuration\n", __FUNCTION__, __LINE__);
                 auto default_profiles = get_default_configuration(dev);
                 filtered_config = filter_stream_requests(default_profiles);
                 return std::make_shared<profile>(dev, filtered_config, _device_request.record_output);
@@ -176,17 +181,57 @@ namespace librealsense
                     {
                         if (st.second > 0 && st.second != r.index) break; // don't disable stream if indexes don't match
                         disable_stream = true;
+                        printf("NKW %s %d disabling stream %d index %d\n", __FUNCTION__, __LINE__, r.stream, r.index);//NKW never here
                         break;
                     }
                 }
                 if (disable_stream) continue;
+                printf("NKW %s %d enabling stream %d index %d width %d height %d format %d fps %d\n", __FUNCTION__, __LINE__, r.stream, r.index, r.width, r.height, r.format, r.fps);
                 config.enable_stream(r.stream, r.index, r.width, r.height, r.format, r.fps);
             }
-            return std::make_shared<profile>(dev, config, _device_request.record_output);
+
+            printf("NKW %s %d listing available profiles on device before creating profile\n", __FUNCTION__, __LINE__);
+            printf("NKW %s %d device has %zu sensors\n", __FUNCTION__, __LINE__, dev->get_sensors_count());// 3 
+            for (size_t i = 0; i < dev->get_sensors_count(); ++i) {
+                auto&& sensor = dev->get_sensor(i);
+                printf("NKW %s %d sensor calling get_stream_profiles\n", __FUNCTION__, __LINE__);
+                auto profiles = sensor.get_stream_profiles(PROFILE_TAG_SUPERSET);
+                printf("NKW %s %d sensor %zu has %zu profiles\n", __FUNCTION__, __LINE__, i, profiles.size());
+                for (auto& p : profiles) {
+                    printf("Available profile: type=%d, index=%d, format=%d, fps=%d\n",
+                        p->get_stream_type(), p->get_stream_index(),
+                        p->get_format(), p->get_framerate());
+                }
+            }
+            //printf("NKW %s %d before creating profile\n", __FUNCTION__, __LINE__);
+            //printf("NKW %s %d dev pointer: %p\n", __FUNCTION__, __LINE__, dev.get());
+            printf("NKW %s %d record_output: '%s'\n", __FUNCTION__, __LINE__, _device_request.record_output.c_str());
+
+            for (auto& stream_config_pair : config.get_requests()) {
+                auto& stream_config = stream_config_pair.second;
+                printf("NKW config contains: stream=%d, index=%d, width=%d, height=%d, format=%d, fps=%d\n",
+                       stream_config.stream, stream_config.index, stream_config.width,
+                       stream_config.height, stream_config.format, stream_config.fps);
+            }
+
+            try {
+                auto result = std::make_shared<profile>(dev, config, _device_request.record_output);
+                printf("NKW %s %d profile created successfully\n", __FUNCTION__, __LINE__);//NKW VTG never reach here
+                return result;
+            } catch (const std::exception& e) {
+                printf("NKW %s %d EXCEPTION in profile constructor: %s\n", __FUNCTION__, __LINE__, e.what());
+                throw;
+            } catch (...) {
+                printf("NKW %s %d UNKNOWN EXCEPTION in profile constructor\n", __FUNCTION__, __LINE__);
+                throw;
+            }
+
+            //return std::make_shared<profile>(dev, config, _device_request.record_output);
         }
 
         std::shared_ptr<profile> config::resolve(std::shared_ptr<pipeline> pipe, const std::chrono::milliseconds& timeout)
         {
+            printf("NKW config::%s %d enter here\n", __FUNCTION__, __LINE__);
             std::lock_guard<std::mutex> lock(_mtx);
             _resolved_profile.reset();
 
@@ -204,12 +249,16 @@ namespace librealsense
             {
                 try
                 {
+                    printf("NKW %s %d trying to resolve config on device\n", __FUNCTION__, __LINE__);
                     auto dev = dev_info->create_device();
+                    printf("NKW %s %d created device\n", __FUNCTION__, __LINE__);
                     _resolved_profile = resolve(dev);
+                    printf("NKW %s %d resolved config\n", __FUNCTION__, __LINE__); // never reach here
                     return _resolved_profile;
                 }
                 catch (const std::exception& e)
                 {
+                    printf("NKW %s Iterate available devices - config can not be resolved. %s\n", __FUNCTION__, e.what());
                     LOG_DEBUG("Iterate available devices - config can not be resolved. " << e.what());
                 }
             }
@@ -221,7 +270,7 @@ namespace librealsense
                 _resolved_profile = resolve(dev);
                 return _resolved_profile;
             }
-
+            printf("NKW %s before throwing exception\n", __FUNCTION__);
             throw std::runtime_error("Failed to resolve request. No device found that satisfies all requirements");
 
             assert(0); //Unreachable code
@@ -313,7 +362,6 @@ namespace librealsense
             {
                 return pipe->wait_for_device(timeout, _device_request.serial);
             }
-
             return nullptr;
         }
 

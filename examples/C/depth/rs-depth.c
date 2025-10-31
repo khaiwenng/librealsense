@@ -82,7 +82,7 @@ int main()
     // The returned object should be released with rs2_delete_device_list(...)
     rs2_device_list* device_list = rs2_query_devices(ctx, &e);
     check_error(e);
-
+    printf("NKW");
     int dev_count = rs2_get_device_count(device_list, &e);
     check_error(e);
     printf("There are %d connected RealSense devices.\n", dev_count);
@@ -118,7 +118,8 @@ int main()
     rs2_pipeline_profile* pipeline_profile = rs2_pipeline_start_with_config(pipeline, config, &e);
     if (e)
     {
-        printf("The connected device doesn't support depth streaming!\n");
+        check_error(e);
+        printf("The connected device doesn't support depth streaming! %s\n", rs2_get_error_message(e));
         exit(EXIT_FAILURE);
     }
 

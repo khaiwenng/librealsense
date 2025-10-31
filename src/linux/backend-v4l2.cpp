@@ -51,6 +51,7 @@
 #include <linux/media.h>
 #include <linux/uvcvideo.h>
 #include <linux/videodev2.h>
+#include <linux/v4l2-subdev.h>
 #include <regex>
 #include <list>
 
@@ -295,7 +296,8 @@ namespace librealsense
             v4l2_buffer buf = {};
             struct v4l2_plane planes[VIDEO_MAX_PLANES] = {};
             buf.type = _type;
-            buf.memory = use_memory_map ? V4L2_MEMORY_MMAP : V4L2_MEMORY_USERPTR;
+            //buf.memory = use_memory_map ? V4L2_MEMORY_MMAP : V4L2_MEMORY_USERPTR;
+            buf.memory = use_memory_map ? V4L2_MEMORY_MMAP : V4L2_MEMORY_MMAP ;
             buf.index = index;
             buf.m.offset = 0;
             if (type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
@@ -307,6 +309,7 @@ namespace librealsense
 
             // Prior to kernel 4.16 metadata payload was attached to the end of the video payload
             uint8_t md_extra = (V4L2_BUF_TYPE_VIDEO_CAPTURE==type) ? MAX_META_DATA_SIZE : 0;
+
             _original_length = buf.length;
             _offset = buf.m.offset;
             if (type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
@@ -314,7 +317,9 @@ namespace librealsense
                 _offset = buf.m.planes[0].m.mem_offset;
                 md_extra = 0;
             }
+
             _length = _original_length + md_extra;
+            printf("NKW %s _length=%u _original_length=%u md_extra=%u\n", __FUNCTION__, _length, _original_length, md_extra);
 
             if (use_memory_map)
             {
@@ -338,7 +343,8 @@ namespace librealsense
             v4l2_buffer buf = {};
             struct v4l2_plane planes[VIDEO_MAX_PLANES] = {};
             buf.type = _type;
-            buf.memory = _use_memory_map ? V4L2_MEMORY_MMAP : V4L2_MEMORY_USERPTR;
+            //buf.memory = _use_memory_map ? V4L2_MEMORY_MMAP : V4L2_MEMORY_USERPTR;
+            buf.memory = _use_memory_map ? V4L2_MEMORY_MMAP : V4L2_MEMORY_MMAP;
             buf.index = _index;
             buf.length = _length;
             if (_type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
@@ -351,8 +357,10 @@ namespace librealsense
             }
             if(xioctl(fd, VIDIOC_QBUF, &buf) < 0)
                 throw linux_backend_exception("xioctl(VIDIOC_QBUF) failed");
-            else
+            else {
+                printf("NKW %s %d: Queued buffer index %u of type %u for fd %d byteused %u\n", __FUNCTION__, __LINE__, _index, _type, fd, buf.bytesused);
                 LOG_DEBUG_V4L("prepare_for_streaming fd " << std::dec << fd);
+            }
         }
 
         buffer::~buffer()
@@ -384,7 +392,7 @@ namespace librealsense
         void buffer::request_next_frame(int fd, bool force)
         {
             std::lock_guard<std::mutex> lock(_mutex);
-
+            printf("NKW %s %d requesting next frame for fd %d\n", __FUNCTION__, __LINE__, fd);
             if (_must_enqueue || force)
             {
                 if (!_use_memory_map)
@@ -539,6 +547,7 @@ namespace librealsense
                 throw linux_backend_exception(rsutils::string::from() << __FUNCTION__ << ": Cannot open '" << dev_name);
 
             v4l2_capability cap = {};
+            printf("NKW %s calling VIDIOC_QUERYCAP on fd %d for device %s\n", __FUNCTION__, *fd, dev_name.c_str());
             if(xioctl(*fd, VIDIOC_QUERYCAP, &cap) < 0)
             {
                 if(errno == EINVAL)
@@ -696,6 +705,38 @@ namespace librealsense
             return video_paths;
         }
 
+        std::vector<std::string> v4l_uvc_device::get_subdevice_paths()
+        {
+            std::vector<std::string> subdevice_paths;
+            // Enumerate all subdevices present on the system
+            DIR * dir = opendir("/sys/class/v4l-subdev");
+            if(!dir)
+            {
+                LOG_INFO("Cannot access /sys/class/v4l-subdev");
+                return subdevice_paths;
+            }
+            while (dirent * entry = readdir(dir))
+            {
+                std::string name = entry->d_name;
+                if(name == "." || name == "..") continue;
+
+                // Resolve a pathname to ignore virtual video devices and  sub-devices
+                std::string subdev_path = "/sys/class/v4l-subdev/" + name;
+                std::string real_path{};
+                char buff[PATH_MAX] = {0};
+                if (realpath(subdev_path.c_str(), buff) != nullptr)
+                {
+                    real_path = std::string(buff);
+                    if (real_path.find("virtual") != std::string::npos)
+                        continue;
+                    subdevice_paths.push_back(real_path);
+                }
+            }
+            closedir(dir);
+            return subdevice_paths;
+        }
+
+
         bool v4l_uvc_device::is_usb_path_valid(const std::string& usb_video_path, const std::string& dev_name,
                                                std::string& busnum, std::string& devnum, std::string& devpath)
         {
@@ -796,6 +837,7 @@ namespace librealsense
             if (fd < 0)
                 throw linux_backend_exception("Mipi device capability could not be grabbed");
             int err = ioctl(fd, VIDIOC_QUERYCAP, &vcap);
+
             if (err)
             {
                 struct media_device_info mdi;
@@ -812,19 +854,20 @@ namespace librealsense
                         card = mdi.model;
                     else
                         card = mdi.driver;
-                 }
+                }
             }
             else
             {
                 bus_info = reinterpret_cast<const char *>(vcap.bus_info);
                 card = reinterpret_cast<const char *>(vcap.card);
+                //NKW enter here
             }
             ::close(fd);
         }
 
         uvc_device_info v4l_uvc_device::get_info_from_mipi_device_path(const std::string& video_path, const std::string& name)
         {
-            uint16_t vid{}, pid{}, mi{};
+            uint16_t vid{}, pid{}, mi{}, sdi{};
             usb_spec usb_specification(usb_undefined);
             std::string bus_info, card;
 
@@ -873,11 +916,27 @@ namespace librealsense
                 LOG_WARNING("Unresolved Video4Linux device mi, device is skipped");
                 throw linux_backend_exception("Unresolved Video4Linux device, device is skipped");
             }
+            printf("NKW %s mi = %d for dev_name %s\n", __FUNCTION__, mi, dev_name.c_str());
+
+            // set sub device index
+            // depth = /dev/v4l-subdev1
+            // ir = /dev/v4l-subdev2
+            // rgb = /dev/v4l-subdev3
+            // imu = /dev/v4l-subdev4
+            if (strcmp(dev_name.c_str(), "/dev/video-rs-depth-sd-0") == 0)
+                sdi = 1; // depth
+            else if (strcmp(dev_name.c_str(), "/dev/video-rs-color-sd-0") == 0)
+                sdi = 3; // rgb
+            else if (strcmp(dev_name.c_str(), "/dev/video-rs-ir-sd-0") == 0)
+                sdi = 2; // ir
+            else if (strcmp(dev_name.c_str(), "/dev/video-rs-imu-sd-0") == 0)
+                sdi = 4; // imu
 
             uvc_device_info info{};
             info.pid = pid;
             info.vid = vid;
             info.mi = mi;
+            info.sdi = sdi;
             info.id = dev_name;
             info.device_path = video_path;
             // unique id for MIPI: This will assign sensor set for each camera.
@@ -914,6 +973,7 @@ namespace librealsense
                                    const std::string&)> action)
         {
             std::vector<std::string> video_paths = get_video_paths();
+            std::vector<std::string> subdevice_paths = get_subdevice_paths();
             typedef std::pair<uvc_device_info,std::string> node_info;
             std::vector<node_info> uvc_nodes,uvc_devices;
             std::vector<node_info> mipi_rs_enum_nodes;
@@ -926,22 +986,23 @@ namespace librealsense
                     int vfd = -1;
                     std::string device_path = "video-rs-" + vs + "-" + std::to_string(i);
                     std::string device_md_path = "video-rs-" + vs + "-md-" + std::to_string(i);
-                    std::string video_path = "/dev/" + device_path;
+                    std::string subdevice_path = "video-rs-" + vs + "-sd-" + std::to_string(i);
+                    std::string video_path = "/dev/" + device_path; // /dev/video-rs-<sensor>-<i>
                     std::string video_md_path = "/dev/" + device_md_path;
-                    std::string dfu_device_path = "/dev/d4xx-dfu-" + std::to_string(i);
+                    std::string subdev_path = "/dev/" + subdevice_path; // /dev/video-rs-<sensor>-sd-<i>
+                    std::string dfu_device_path = "/dev/d4xx-dfu-" + std::to_string(i);// /dev/d4xx-dfu-<i>
                     uvc_device_info info{};
 
-                    // Get Video node
-                    // Check if file on video_path is exists
+                    // Get Video node (dev/video-rs-<sensor>-<i>)
+                    // Check if file on video_path is exists 
                     vfd = open(video_path.c_str(), O_RDONLY | O_NONBLOCK);
-
                     if (vfd < 0) // file does not exists, continue to the next one
                         continue;
                     else
                         ::close(vfd); // file exists, close file and continue to assign it
                     try
                     {
-                        info = get_info_from_mipi_device_path(video_path, device_path);
+                        info = get_info_from_mipi_device_path(video_path, device_path);// /dev/video-rs-<sensor>-<i>, video-rs-<sensor>-<i>
                     }
                     catch(const std::exception & e)
                     {
@@ -949,9 +1010,46 @@ namespace librealsense
                         continue;
                     }
 
+                    vfd = open(subdev_path.c_str(), O_RDONLY | O_NONBLOCK);
+                    if (vfd < 0) // file does not exists, continue to the next one
+                    {
+                        printf("NKW %s %d sub-device %s is not ready\n", __FUNCTION__, __LINE__, subdev_path.c_str());
+                        LOG_WARNING("MIPI sub-device path " << subdev_path << " does not exist, skipping device");
+                    }
+                    else
+                        ::close(vfd); // file exists, close file and continue to assign it
+                    try
+                    {
+                        //info = get_info_from_mipi_device_path(subdev_path, subdevice_path);// /dev/video-rs-<sensor>-sd-<i>, video-rs-<sensor>-sd-<i>
+                        if (strcmp(subdev_path.c_str(), "/dev/video-rs-depth-sd-0") == 0) {
+                            info.subdev_name = subdev_path;
+                            info.sdi = 1; // depth
+                        }
+                        else if (strcmp(subdev_path.c_str(), "/dev/video-rs-color-sd-0") == 0) {
+                            info.subdev_name = subdev_path;
+                            info.sdi = 3; // rgb
+                        }
+                        else if (strcmp(subdev_path.c_str(), "/dev/video-rs-ir-sd-0") == 0) {
+                            info.subdev_name = subdev_path;
+                            info.sdi = 2; // ir
+                        }
+                        else if (strcmp(subdev_path.c_str(), "/dev/video-rs-imu-sd-0") == 0) {
+                            info.subdev_name = subdev_path;
+                            info.sdi = 4; // imu
+                        }
+                        else {
+                            printf("NKW %s %d sub-device %s issue: unknown sub-device\n", __FUNCTION__, __LINE__, subdev_path.c_str());
+                            LOG_WARNING("MIPI sub-device path " << subdev_path << " is unknown, skipping device");
+                        }
+                    }
+                    catch(const std::exception & e)
+                    {
+                        printf("NKW %s %d sub-device %s issue: %s\n", __FUNCTION__, __LINE__, subdev_path.c_str(), e.what());
+                        LOG_WARNING("MIPI sub-device issue: " << e.what());
+                    }
+
                     // Get DFU node for MIPI camera
                     vfd = open(dfu_device_path.c_str(), O_RDONLY | O_NONBLOCK);
-
                     if (vfd >= 0) {
                         ::close(vfd); // file exists, close file and continue to assign it
                         info.dfu_device_path = dfu_device_path;
@@ -965,10 +1063,14 @@ namespace librealsense
                     // Check if file on video_md_path is exists
                     vfd = open(video_md_path.c_str(), O_RDONLY | O_NONBLOCK);
 
-                    if (vfd < 0) // file does not exists, continue to the next one
-                        continue;
-                    else
+                    if (vfd < 0) { // file does not exists, continue to the next one 
+                        printf("NKW %s %d metadata node %s is not present\n", __FUNCTION__, __LINE__, video_md_path.c_str());
+                        continue; // NKW skip
+                    }
+                    else {
+                        printf("NKW %s %d metadata node %s is present\n", __FUNCTION__, __LINE__, video_md_path.c_str());
                         ::close(vfd); // file exists, close file and continue to assign it
+                    }
 
                     try
                     {
@@ -1016,7 +1118,7 @@ namespace librealsense
                     }
                     else // continue as we already have mipi nodes enumerated by rs links in uvc_nodes
                     {
-                        continue;
+                        continue; // NKW skip here
                     }
 
                     std::string dev_name;
@@ -1157,7 +1259,9 @@ namespace librealsense
                 {
                     _name = name;
                     _info = i;
+                    _subdev_name = i.subdev_name;
                     _device_path = i.device_path;
+                    _subdevice_path = i.subdevice_path;
                     _device_usb_spec = i.conn_spec;
                 }
             });
@@ -1179,74 +1283,107 @@ namespace librealsense
 
         void v4l_uvc_device::probe_and_commit(stream_profile profile, frame_callback callback, int buffers)
         {
+            printf("NKW %s %d profile fps = %f", __FUNCTION__, __LINE__, profile.fps);
             if(!_is_capturing && !_callback)
             {
                 v4l2_fmtdesc pixel_format = {};
                 pixel_format.type = _dev.buf_type;
 
-                while (ioctl(_fd, VIDIOC_ENUM_FMT, &pixel_format) == 0)
+                if (_sub_fd > 0)
                 {
-                    v4l2_frmsizeenum frame_size = {};
-                    frame_size.pixel_format = pixel_format.pixelformat;
-
-                    uint32_t fourcc = (const big_endian<int> &)pixel_format.pixelformat;
-
-                    if (pixel_format.pixelformat == 0)
+                    v4l2_subdev_mbus_code_enum pixel_format_subdev = {};
+                    pixel_format_subdev.index = 0;
+                    pixel_format_subdev.pad = 0;
+                    while (ioctl(_sub_fd, VIDIOC_SUBDEV_ENUM_MBUS_CODE, &pixel_format_subdev) == 0)
                     {
-                        // Microsoft Depth GUIDs for R400 series are not yet recognized
-                        // by the Linux kernel, but they do not require a patch, since there
-                        // are "backup" Z16 and Y8 formats in place
-                        static const std::set<std::string> pending_formats = {
-                            "00000050-0000-0010-8000-00aa003",
-                            "00000032-0000-0010-8000-00aa003",
-                        };
+                        uint32_t temp_fourcc = mbus_code_to_fourcc(pixel_format_subdev.code);
+                        uint32_t fourcc = (const big_endian<int> &)temp_fourcc;
 
-                        if (std::find(pending_formats.begin(),
-                                      pending_formats.end(),
-                                      (const char*)pixel_format.description) ==
-                            pending_formats.end())
+                        printf("NKW %s %d pixel_format_subdev mbus_code = 0x%X, temp_fourcc=0x%X, fourcc = 0x%X\n", __FUNCTION__, __LINE__, pixel_format_subdev.code, temp_fourcc, fourcc);
+                        ++pixel_format_subdev.index;
+                    }
+                }
+                else {
+                    while (ioctl(_fd, VIDIOC_ENUM_FMT, &pixel_format) == 0)
+                    {
+                        v4l2_frmsizeenum frame_size = {};
+                        frame_size.pixel_format = pixel_format.pixelformat;
+
+                        uint32_t fourcc = (const big_endian<int> &)pixel_format.pixelformat;
+
+                        if (pixel_format.pixelformat == 0)
                         {
-                            const std::string s(rsutils::string::from() << "!" << pixel_format.description);
-                            std::regex rgx("!([0-9a-f]+)-.*");
-                            std::smatch match;
+                            // Microsoft Depth GUIDs for R400 series are not yet recognized
+                            // by the Linux kernel, but they do not require a patch, since there
+                            // are "backup" Z16 and Y8 formats in place
+                            static const std::set<std::string> pending_formats = {
+                                "00000050-0000-0010-8000-00aa003",
+                                "00000032-0000-0010-8000-00aa003",
+                            };
 
-                            if (std::regex_search(s.begin(), s.end(), match, rgx))
+                            if (std::find(pending_formats.begin(),
+                                        pending_formats.end(),
+                                        (const char*)pixel_format.description) ==
+                                pending_formats.end())
                             {
-                                std::stringstream ss;
-                                ss <<  match[1];
-                                int id;
-                                ss >> std::hex >> id;
-                                fourcc = (const big_endian<int> &)id;
+                                const std::string s(rsutils::string::from() << "!" << pixel_format.description);
+                                std::regex rgx("!([0-9a-f]+)-.*");
+                                std::smatch match;
 
-                                if (fourcc == profile.format)
+                                if (std::regex_search(s.begin(), s.end(), match, rgx))
                                 {
-                                    throw linux_backend_exception(rsutils::string::from() << "The requested pixel format '"  << fourcc_to_string(id)
-                                                                  << "' is not natively supported by the running Linux kernel and likely requires a patch");
+                                    std::stringstream ss;
+                                    ss <<  match[1];
+                                    int id;
+                                    ss >> std::hex >> id;
+                                    fourcc = (const big_endian<int> &)id;
+
+                                    if (fourcc == profile.format)
+                                    {
+                                        throw linux_backend_exception(rsutils::string::from() << "The requested pixel format '"  << fourcc_to_string(id)
+                                                                    << "' is not natively supported by the running Linux kernel and likely requires a patch");
+                                    }
                                 }
                             }
                         }
+                        ++pixel_format.index;
                     }
-                    ++pixel_format.index;
                 }
-
                 set_format(profile);
 
                 v4l2_streamparm parm = {};
                 parm.type = _dev.buf_type;
-                if(xioctl(_fd, VIDIOC_G_PARM, &parm) < 0)
-                    throw linux_backend_exception("xioctl(VIDIOC_G_PARM) failed");
 
-                parm.parm.capture.timeperframe.numerator = 1;
-                parm.parm.capture.timeperframe.denominator = profile.fps;
-                if(xioctl(_fd, VIDIOC_S_PARM, &parm) < 0)
-                    throw linux_backend_exception("xioctl(VIDIOC_S_PARM) failed");
+                v4l2_subdev_frame_interval frame_interval = {};
+                frame_interval.pad = 0;
 
+                if(xioctl(_fd, VIDIOC_G_PARM, &parm) < 0) {
+                    if(xioctl(_sub_fd, VIDIOC_SUBDEV_G_FRAME_INTERVAL, &frame_interval) < 0)
+                        throw linux_backend_exception("xioctl(VIDIOC_G_PARM) and xioctl(VIDIOC_SUBDEV_G_FRAME_INTERVAL) failed");
+
+                    frame_interval.interval.numerator = 1;
+                    frame_interval.interval.denominator = profile.fps;
+
+                    if(xioctl(_sub_fd, VIDIOC_SUBDEV_S_FRAME_INTERVAL, &frame_interval) < 0)
+                        throw linux_backend_exception("xioctl(VIDIOC_SUBDEV_S_FRAME_INTERVAL) failed");
+
+                    printf("NKW %s %d set fps to %f\n", __FUNCTION__, __LINE__, profile.fps);
+                } else {
+                    parm.parm.capture.timeperframe.numerator = 1;
+                    parm.parm.capture.timeperframe.denominator = profile.fps;
+
+                    if(xioctl(_fd, VIDIOC_S_PARM, &parm) < 0)
+                        throw linux_backend_exception("xioctl(VIDIOC_S_PARM) failed");
+                }
+
+                printf("NKW %s %d Committing profile\n", __FUNCTION__, __LINE__);
                 // Init memory mapped IO
                 negotiate_kernel_buffers(static_cast<size_t>(buffers));
                 allocate_io_buffers(static_cast<size_t>(buffers));
 
                 _profile =  profile;
                 _callback = callback;
+                printf("NKW %s %d Committed profile\n", __FUNCTION__, __LINE__);//done
             }
             else
             {
@@ -1256,14 +1393,17 @@ namespace librealsense
 
         void v4l_uvc_device::stream_on(std::function<void(const notification& n)> error_handler)
         {
+            printf("NKW v4l_uvc_device::%s %d Starting stream_on\n", __FUNCTION__, __LINE__);
             if(!_is_capturing)
             {
                 _error_handler = error_handler;
 
                 // Start capturing
+                printf("NKW v4l_uvc_device::%s %d preparing capture buffers\n", __FUNCTION__, __LINE__);
                 prepare_capture_buffers();
 
                 // Synchronise stream requests for meta and video data.
+                printf("NKW v4l_uvc_device::%s %d starting streamon\n", __FUNCTION__, __LINE__);
                 streamon();
 
                 _is_capturing = true;
@@ -1276,6 +1416,7 @@ namespace librealsense
 
         void v4l_uvc_device::prepare_capture_buffers()
         {
+            printf("NKW v4l_uvc_device::%s %d preparing capture buffers\n", __FUNCTION__, __LINE__);
             for (auto&& buf : _buffers) buf->prepare_for_streaming(_fd);
         }
 
@@ -1296,11 +1437,13 @@ namespace librealsense
 
         void v4l_uvc_device::start_callbacks()
         {
+            printf("NKW %s %d Starting callbacks\n", __FUNCTION__, __LINE__);
             _is_started = true;
         }
 
         void v4l_uvc_device::stop_callbacks()
         {
+            printf("NKW %s %d Stopping callbacks\n", __FUNCTION__, __LINE__);
             _is_started = false;
         }
 
@@ -1375,6 +1518,7 @@ namespace librealsense
                  FD_SET(fd, &fds);
              }
 
+            printf("NKW %s %d Entering poll\n", __FUNCTION__, __LINE__);
             struct timespec mono_time;
             int ret = clock_gettime(CLOCK_MONOTONIC, &mono_time);
             if (ret) throw linux_backend_exception("could not query time!");
@@ -1407,6 +1551,7 @@ namespace librealsense
                     LOG_DEBUG_V4L("Select interrupted, val = " << val << ", error = " << errno);
             } while (val < 0 && errno == EINTR);
 
+            printf("NKW %s %d Select done, val = %d at %s\n", __FUNCTION__, __LINE__, val, time_in_HH_MM_SS_MMM().c_str());
             LOG_DEBUG_V4L("Select done, val = " << val << " at " << time_in_HH_MM_SS_MMM());
             if(val < 0)
             {
@@ -1424,17 +1569,20 @@ namespace librealsense
                     {
                         if(!_is_capturing)
                         {
+                            printf("NKW %s %d Stop pipe signalled, exiting capture loop\n", __FUNCTION__, __LINE__);
                             LOG_INFO("V4L stream is closed");
                             return;
                         }
                         else
                         {
+                            printf("NKW %s %d Stop pipe was signalled during streaming\n", __FUNCTION__, __LINE__);
                             LOG_ERROR("Stop pipe was signalled during streaming");
                             return;
                         }
                     }
                     else // Check and acquire data buffers from kernel
                     {
+                        printf("NKW %s %d Data available on fds, acquiring buffers\n", __FUNCTION__, __LINE__);
                         bool md_extracted = false;
                         bool keep_md = false;
                         bool wa_applied = false;
@@ -1464,6 +1612,7 @@ namespace librealsense
                         // VIDEO STREAM
                         if(FD_ISSET(_fd, &fds))
                         {
+                            printf("NKW %s %d Video fd is set, dequeueing buffer\n", __FUNCTION__, __LINE__);
                             FD_CLR(_fd,&fds);
                             v4l2_buffer buf = {};
                             struct v4l2_plane planes[VIDEO_MAX_PLANES] = {};
@@ -1475,8 +1624,10 @@ namespace librealsense
                             }
                             if(xioctl(_fd, VIDIOC_DQBUF, &buf) < 0)
                             {
+                                printf("NKW %s %d VIDIOC_DQBUF failed\n", __FUNCTION__, __LINE__);
                                 LOG_DEBUG_V4L("Dequeued empty buf for fd " << std::dec << _fd);
                             }
+                            printf("NKW %s %d VIDIOC_DQBUF done, buf index = %d\n", __FUNCTION__, __LINE__, buf.index);
                             LOG_DEBUG_V4L("Dequeued buf " << std::dec << buf.index << " for fd " << _fd << " seq " << buf.sequence);
                             buf.type = _dev.buf_type;
                             buf.memory = _use_memory_map ? V4L2_MEMORY_MMAP : V4L2_MEMORY_USERPTR;
@@ -1488,14 +1639,16 @@ namespace librealsense
 
                             if (_is_started)
                             {
-                                if(buf.bytesused == 0)
+                                if(buf.bytesused == 0) // NKW not here
                                 {
+                                    printf("NKW %s %d Empty video frame arrived, index %d\n", __FUNCTION__, __LINE__, buf.index);
                                     LOG_DEBUG_V4L("Empty video frame arrived, index " << buf.index);
                                     return;
                                 }
 
                                 // Drop partial and overflow frames (assumes D4XX metadata only)
-                                bool partial_frame = (!compressed_format && (buf.bytesused < buffer->get_full_length() - MAX_META_DATA_SIZE));
+                                //bool partial_frame = (!compressed_format && (buf.bytesused < buffer->get_full_length() - MAX_META_DATA_SIZE));
+                                bool partial_frame = false; // for Intel IPU, byteused will always be smaller than get_full_length() - MAX_META_DATA_SIZE
                                 bool overflow_frame = (buf.bytesused ==  buffer->get_length_frame_only() + MAX_META_DATA_SIZE);
                                 if (_dev.buf_type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
                                     /* metadata size is one line of profile, temporary disable validation */
@@ -1522,6 +1675,7 @@ namespace librealsense
                                             s << "overflow video frame detected!\nSize " << buf.bytesused
                                                 << ", payload size " << buffer->get_length_frame_only();
                                     }
+                                    printf("NKW %s %d Incomplete frame arrived, index %d: %s\n", __FUNCTION__, __LINE__, buf.index, s.str().c_str());
                                     LOG_DEBUG("Incomplete frame received: " << s.str()); // Ev -try1
                                     bool kpi_violated = _frame_drop_monitor.update_and_check_kpi(_profile, buf.timestamp);
                                     if (kpi_violated)
@@ -1529,10 +1683,11 @@ namespace librealsense
                                         librealsense::notification n = { RS2_NOTIFICATION_CATEGORY_FRAME_CORRUPTED, 0, RS2_LOG_SEVERITY_WARN, s.str() };
                                         _error_handler(n);
                                     }
-                                    
+
                                     // Check if metadata was already allocated
                                     if (buf_mgr.metadata_size())
                                     {
+                                        printf("NKW %s %d Metadata was present when partial frame arrived, mark md as extracted\n", __FUNCTION__, __LINE__);
                                         LOG_WARNING("Metadata was present when partial frame arrived, mark md as extracted");
                                         md_extracted = true;
                                         LOG_DEBUG_V4L("Discarding md due to invalid video payload");
@@ -1542,6 +1697,7 @@ namespace librealsense
                                 }
                                 else
                                 {
+                                    printf("NKW %s %d Valid frame arrived, index %d, bytesused = %d\n", __FUNCTION__, __LINE__, buf.index, buf.bytesused);
                                     if (!_info.has_metadata_node)
                                     {
                                         if(has_metadata())
@@ -1639,7 +1795,7 @@ namespace librealsense
                                 keep_md = true;
                             LOG_DEBUG("FD_ISSET: no data on video node sink");
                         }
-
+                        printf("NKW %s %d Poll cycle done, uploading data if ready\n", __FUNCTION__, __LINE__);
                         // pulling synchronized video and metadata and uploading them to user's callback
                         upload_video_and_metadata_from_syncer(buf_mgr);
                     }
@@ -1670,15 +1826,24 @@ namespace librealsense
 
         void v4l_uvc_device::upload_video_and_metadata_from_syncer(buffers_mgr& buf_mgr)
         {
+            printf("NKW %s %d Uploading video and metadata from syncer if ready\n", __FUNCTION__, __LINE__);
             // uploading to user's callback
             std::shared_ptr<v4l2_buffer> video_v4l2_buffer;
             std::shared_ptr<v4l2_buffer> md_v4l2_buffer;
 
-            if (_is_started && is_metadata_streamed())
+            if (_is_started) {
+                printf("NKW %s %d Device is started\n", __FUNCTION__, __LINE__);
+            }
+
+            //if (_is_started && is_metadata_streamed())
+            if (_is_started)
             {
+                printf("NKW %s %d Video and metadata syncer is ready\n", __FUNCTION__, __LINE__);
                 int video_fd = -1, md_fd = -1;
                 if (_video_md_syncer.pull_video_with_metadata(video_v4l2_buffer, md_v4l2_buffer, video_fd, md_fd))
                 {
+                    printf("NKW %s %d Synchronized video and metadata pulled, video index %d, md index %d\n", __FUNCTION__, __LINE__,
+                            video_v4l2_buffer->index, md_v4l2_buffer->index);
                     // Preparing video buffer
                     auto video_buffer = get_video_buffer(video_v4l2_buffer->index);
                     video_buffer->attach_buffer(*video_v4l2_buffer);
@@ -1687,19 +1852,24 @@ namespace librealsense
                     // the current polling iteration (was taken from the syncer's video queue)
                     if (buf_mgr.get_buffers()[e_video_buf]._file_desc == -1)
                     {
+                        printf("NKW %s %d Video buffer is not ready, requesting new buffer\n", __FUNCTION__, __LINE__);
                         buf_mgr.handle_buffer(e_video_buf, video_fd, *video_v4l2_buffer, video_buffer);
                     }
+                    printf("NKW %s %d Video buffer prepared, transferring to callback\n", __FUNCTION__, __LINE__);
                     buf_mgr.handle_buffer(e_video_buf, -1); // transfer new buffer request to the frame callback
 
                     // Preparing metadata buffer
+                    printf("NKW %s %d Preparing metadata buffer\n", __FUNCTION__, __LINE__);
                     auto metadata_buffer = get_md_buffer(md_v4l2_buffer->index);
                     set_metadata_attributes(buf_mgr, md_v4l2_buffer->bytesused, metadata_buffer->get_frame_start());
                     metadata_buffer->attach_buffer(*md_v4l2_buffer);
 
                     if (buf_mgr.get_buffers()[e_metadata_buf]._file_desc == -1)
                     {
+                        printf("NKW %s %d Metadata buffer is not ready, requesting new buffer\n", __FUNCTION__, __LINE__);
                         buf_mgr.handle_buffer(e_metadata_buf, md_fd, *md_v4l2_buffer, metadata_buffer);
                     }
+                    printf("NKW %s %d Metadata buffer prepared, transferring to callback\n", __FUNCTION__, __LINE__);
                     buf_mgr.handle_buffer(e_metadata_buf, -1); // transfer new buffer request to the frame callback
 
                     auto frame_sz = buf_mgr.md_node_present() ? video_v4l2_buffer->bytesused :
@@ -1721,9 +1891,12 @@ namespace librealsense
                 }
                 else
                 {
+                    printf("NKW %s %d Video and metadata syncer is not ready\n", __FUNCTION__, __LINE__);
                     LOG_DEBUG("video_md_syncer - synchronized video and md could not be pulled");
                 }
             }
+            else
+                printf("NKW %s %d do nothing, not started or metadata not streamed\n", __FUNCTION__, __LINE__);
         }
 
         void v4l_uvc_device::set_metadata_attributes(buffers_mgr& buf_mgr, __u32 bytesused, uint8_t* md_start)
@@ -1956,21 +2129,151 @@ namespace librealsense
 
             return range;
         }
+        uint32_t v4l_uvc_device::mbus_code_to_fourcc(uint32_t mbus_code) const
+        {
+            // Common media bus code to fourcc mappings
+            switch (mbus_code) {
+                // RGB formats
+                case MEDIA_BUS_FMT_RGB888_1X24:
+                    printf("NKW %s RGB888 format detected\n", __FUNCTION__);
+                    return V4L2_PIX_FMT_RGB24;
+                case MEDIA_BUS_FMT_BGR888_1X24:
+                    printf("NKW %s BGR888 format detected\n", __FUNCTION__);
+                    return V4L2_PIX_FMT_BGR24;
+                
+                // YUV formats
+                case MEDIA_BUS_FMT_YUYV8_2X8:
+                case MEDIA_BUS_FMT_YUYV8_1X16:
+                    printf("NKW %s YUYV format detected\n", __FUNCTION__);
+                    return V4L2_PIX_FMT_YUYV;
+                case MEDIA_BUS_FMT_UYVY8_2X8:
+                case MEDIA_BUS_FMT_UYVY8_1X16:
+                    printf("NKW %s UYVY format detected\n", __FUNCTION__);
+                    return V4L2_PIX_FMT_UYVY;
+                case MEDIA_BUS_FMT_VYUY8_1X16:
+                    printf("NKW %s VYUY format detected\n", __FUNCTION__);
+                    return V4L2_PIX_FMT_VYUY;
+                // RAW/Bayer formats
+                case MEDIA_BUS_FMT_SBGGR8_1X8:
+                    return V4L2_PIX_FMT_SBGGR8;
+                case MEDIA_BUS_FMT_SGBRG8_1X8:
+                    return V4L2_PIX_FMT_SGBRG8;
+                case MEDIA_BUS_FMT_SGRBG8_1X8:
+                    return V4L2_PIX_FMT_SGRBG8;
+                case MEDIA_BUS_FMT_SRGGB8_1X8:
+                    return V4L2_PIX_FMT_SRGGB8;
+                
+                case MEDIA_BUS_FMT_SBGGR10_1X10:
+                    return V4L2_PIX_FMT_SBGGR10;
+                case MEDIA_BUS_FMT_SGBRG10_1X10:
+                    return V4L2_PIX_FMT_SGBRG10;
+                case MEDIA_BUS_FMT_SGRBG10_1X10:
+                    return V4L2_PIX_FMT_SGRBG10;
+                case MEDIA_BUS_FMT_SRGGB10_1X10:
+                    return V4L2_PIX_FMT_SRGGB10;
+                
+                // Grayscale formats
+                case MEDIA_BUS_FMT_Y8_1X8:
+                    printf("NKW %s Y8 format detected\n", __FUNCTION__);
+                    return V4L2_PIX_FMT_GREY;
+                case MEDIA_BUS_FMT_Y10_1X10:
+                    return V4L2_PIX_FMT_Y10;
+                case MEDIA_BUS_FMT_Y12_1X12:
+                    return V4L2_PIX_FMT_Y12;
 
+                // RealSense specific formats (if they exist)
+                case MEDIA_BUS_FMT_FIXED:
+                    printf("NKW %s FIXED format detected\n", __FUNCTION__);
+                    //return 0x2036315A;
+                    return 0x5A313620; // 'Z16 ' in little-endian
+
+                default:
+                    printf("NKW %s %d Unknown mbus_code: 0x%X\n", __FUNCTION__, __LINE__, mbus_code);
+                    return 0; // Unknown format
+            }
+        }
         std::vector<stream_profile> v4l_uvc_device::get_profiles() const
         {
             std::vector<stream_profile> results;
-
+            printf("NKW %s %d Entering\n", __FUNCTION__, __LINE__);
             // Retrieve the caps one by one, first get pixel format, then sizes, then
             // frame rates. See http://linuxtv.org/downloads/v4l-dvb-apis for reference.
+
+            if (_sub_fd > 0) {
+
+                std::vector<uint32_t> supported_mbus_codes;
+                // Get video node supported formats
+                std::set<uint32_t> video_fourccs;
+                v4l2_fmtdesc pixel_format = {};
+                pixel_format.type = _dev.buf_type;
+                pixel_format.index = 0;
+                while (ioctl(_fd, VIDIOC_ENUM_FMT, &pixel_format) == 0) {
+                   video_fourccs.insert(pixel_format.pixelformat);
+                    ++pixel_format.index;
+                    //printf("NKW %s %d video node supported fourcc = 0x%X\n", __FUNCTION__, __LINE__, pixel_format.pixelformat);
+                }
+
+                v4l2_subdev_mbus_code_enum pixel_format_subdev = {};
+                pixel_format_subdev.pad = 0;
+                pixel_format_subdev.index = 0;
+
+                while (ioctl(_sub_fd, VIDIOC_SUBDEV_ENUM_MBUS_CODE, &pixel_format_subdev) == 0)
+                {
+                    //uint32_t temp_fourcc = mbus_code_to_fourcc(pixel_format_subdev.code);
+                    //uint32_t fourcc = (const big_endian<int> &)temp_fourcc;
+                    uint32_t fourcc = mbus_code_to_fourcc(pixel_format_subdev.code);
+
+                    //printf("NKW %s %d pixel_format_subdev mbus_code = 0x%X, temp_fourcc=0x%X, fourcc = 0x%X\n", __FUNCTION__, __LINE__, pixel_format_subdev.code, temp_fourcc, fourcc);
+                    printf("NKW %s %d pixel_format_subdev mbus_code = 0x%X, fourcc = 0x%X\n", __FUNCTION__, __LINE__, pixel_format_subdev.code, fourcc);
+
+                    v4l2_subdev_frame_size_enum frame_size = {};
+                    frame_size.pad = 0;
+                    frame_size.code = pixel_format_subdev.code;
+                    frame_size.index = 0;
+                    while (ioctl(_sub_fd, VIDIOC_SUBDEV_ENUM_FRAME_SIZE, &frame_size) == 0)
+                    {
+                        //printf("NKW %s %d frame_size: width=%d, height=%d\n", __FUNCTION__, __LINE__, frame_size.max_width, frame_size.max_height);
+
+                        v4l2_subdev_frame_interval_enum frame_interval = {};
+                        frame_interval.pad = 0;
+                        frame_interval.code = pixel_format_subdev.code;
+                        frame_interval.width = frame_size.max_width;
+                        frame_interval.height = frame_size.max_height;
+                        frame_interval.index = 0;
+
+                        while (ioctl(_sub_fd, VIDIOC_SUBDEV_ENUM_FRAME_INTERVAL, &frame_interval) == 0)
+                        {
+                            auto fps =
+                                static_cast<float>(frame_interval.interval.denominator) /
+                                static_cast<float>(frame_interval.interval.numerator);
+
+                            stream_profile p{};
+
+                            p.format = fourcc;
+                            p.width = frame_size.max_width;
+                            p.height = frame_size.max_height;
+                            p.fps = fps;
+                            results.push_back(p);
+                            ++frame_interval.index;
+                        }
+                        ++frame_size.index;
+                    }
+                    ++pixel_format_subdev.index;
+                }
+                printf("NKW %s %d Returning from subdev path with %zu profiles\n", __FUNCTION__, __LINE__, results.size());
+                return results;
+            }
+
             v4l2_fmtdesc pixel_format = {};
             pixel_format.type = _dev.buf_type;
+
+            printf("NKW %s %d calling vidioc_enum_fmt\n", __FUNCTION__, __LINE__);
             while (ioctl(_fd, VIDIOC_ENUM_FMT, &pixel_format) == 0)
             {
                 v4l2_frmsizeenum frame_size = {};
                 frame_size.pixel_format = pixel_format.pixelformat;
-
                 uint32_t fourcc = (const big_endian<int> &)pixel_format.pixelformat;
+                printf("NKW %s %d pixel_format.pixelformat = 0x%X, fourcc = 0x%X\n", __FUNCTION__, __LINE__, pixel_format.pixelformat, fourcc);
 
                 if (pixel_format.pixelformat == 0)
                 {
@@ -1999,22 +2302,26 @@ namespace librealsense
                             ss >> std::hex >> id;
                             fourcc = (const big_endian<int> &)id;
 
-                            auto format_str = fourcc_to_string(id);
+                            auto format_str = fourcc_to_string(id);//NKW not here
+                            printf("NKW %s %d format_str = %s\n", __FUNCTION__, __LINE__, format_str.c_str());
                             LOG_WARNING("Pixel format " << pixel_format.description << " likely requires patch for fourcc code " << format_str << "!");
                         }
                     }
                 }
                 else
                 {
+                    printf("NKW %s %d Recognized pixel-format description %s\n", __FUNCTION__, __LINE__, pixel_format.description, pixel_format.pixelformat, fourcc);
                     LOG_DEBUG("Recognized pixel-format " << pixel_format.description);
                 }
-
+                printf("NKW %s %d calling vidioc_enum_framesizes\n", __FUNCTION__, __LINE__);
                 while (ioctl(_fd, VIDIOC_ENUM_FRAMESIZES, &frame_size) == 0)
                 {
                     v4l2_frmivalenum frame_interval = {};
                     frame_interval.pixel_format = pixel_format.pixelformat;
                     frame_interval.width = frame_size.discrete.width;
                     frame_interval.height = frame_size.discrete.height;
+                    printf("NKW %s %d frame_size: width=%d, height=%d\n", __FUNCTION__, __LINE__, frame_size.discrete.width, frame_size.discrete.height);
+                    printf("NKW %s %d calling vidioc_enum_frameintervals\n", __FUNCTION__, __LINE__);
                     while (ioctl(_fd, VIDIOC_ENUM_FRAMEINTERVALS, &frame_interval) == 0)
                     {
                         if (frame_interval.type == V4L2_FRMIVAL_TYPE_DISCRETE)
@@ -2078,10 +2385,12 @@ namespace librealsense
 
         void v4l_uvc_device::capture_loop()
         {
+            printf("NKW %s %d Entering capture_loop\n", __FUNCTION__, __LINE__);
             try
             {
                 while(_is_capturing)
                 {
+                    printf("NKW %s %d Before v4l2_poll\n", __FUNCTION__, __LINE__);
                     poll();
                 }
             }
@@ -2102,11 +2411,14 @@ namespace librealsense
 
         void v4l_uvc_device::streamon() const
         {
+            printf("NKW v4l_uvc_device::%s %d starting stream_on\n", __FUNCTION__, __LINE__);
             stream_ctl_on(_fd, _dev.buf_type);
+            printf("NKW v4l_uvc_device::%s %d completed stream_on\n", __FUNCTION__, __LINE__);
         }
 
         void v4l_uvc_device::streamoff() const
         {
+            printf("NKW v4l_uvc_device::%s %d starting stream_off\n", __FUNCTION__, __LINE__);
             stream_off(_fd, _dev.buf_type);
         }
 
@@ -2142,6 +2454,11 @@ namespace librealsense
             if(_fd < 0)
                 throw linux_backend_exception(rsutils::string::from() <<__FUNCTION__ << " Cannot open '" << _name);
 
+            _sub_fd = open(_subdev_name.c_str(), O_RDWR | O_NONBLOCK, 0);
+            if(_sub_fd < 0)
+                printf("NKW %s subdev non existent or cannot open subdev\n", __FUNCTION__);
+                //throw linux_backend_exception(rsutils::string::from() <<__FUNCTION__ << " Cannot open subdev '" << _subdev_name);
+
             if (pipe(_stop_pipe_fd) < 0)
                 throw linux_backend_exception(rsutils::string::from() <<__FUNCTION__ << " Cannot create pipe!");
 
@@ -2169,8 +2486,10 @@ namespace librealsense
             /* supporting only one plane for IPU6 */
             _dev.num_planes = 1;
             if (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) {
+                printf("NKW %s V4L2_CAP_VIDEO_CAPTURE supported\n", __FUNCTION__);
                 _dev.buf_type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
             } else if (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE_MPLANE) {
+                printf("NKW %s V4L2_CAP_VIDEO_CAPTURE_MPLANE supported\n", __FUNCTION__);
                 _dev.buf_type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
             } else {
                 throw linux_backend_exception(_name + " Buffer type is unknown!");
@@ -2212,12 +2531,16 @@ namespace librealsense
 
         void v4l_uvc_device::set_format(stream_profile profile)
         {
+            printf("NKW v4l_uvc_device::%s %d setting format\n", __FUNCTION__, __LINE__);
+            printf("NKW %s profile.format = 0x%X, %s\n", __FUNCTION__, profile.format, fourcc_to_string(profile.format).c_str());
             v4l2_format fmt = {};
             fmt.type = _dev.buf_type;
             if (_dev.buf_type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
                 fmt.fmt.pix_mp.width       = profile.width;
                 fmt.fmt.pix_mp.height      = profile.height;
+                //fmt.fmt.pix_mp.pixelformat = (const big_endian<int> &)profile.format;
                 fmt.fmt.pix_mp.pixelformat = (const big_endian<int> &)profile.format;
+                //fmt.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_UYVY; // hack
                 fmt.fmt.pix_mp.field       = V4L2_FIELD_NONE;
                 fmt.fmt.pix_mp.num_planes = _dev.num_planes;
                 fmt.fmt.pix_mp.flags = 0;
@@ -2229,7 +2552,9 @@ namespace librealsense
             } else {
                 fmt.fmt.pix.width       = profile.width;
                 fmt.fmt.pix.height      = profile.height;
+                //fmt.fmt.pix.pixelformat = (const big_endian<int> &)profile.format;
                 fmt.fmt.pix.pixelformat = (const big_endian<int> &)profile.format;
+                //fmt.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_UYVY; // hack
                 fmt.fmt.pix.field       = V4L2_FIELD_NONE;
             }
             if(xioctl(_fd, VIDIOC_S_FMT, &fmt) < 0)
@@ -2526,6 +2851,7 @@ namespace librealsense
                 // W/O multiplexing this will create a blocking call for metadata node
                 if(xioctl(_md_fd, VIDIOC_DQBUF, &buf) < 0)
                 {
+                    printf("NKW %s %d Metadata VIDIOC_DQBUF failed, errno=%d\n", __FUNCTION__, __LINE__, errno);
                     LOG_DEBUG_V4L("Dequeued empty buf for md fd " << std::dec << _md_fd);
                 }
 
@@ -2548,7 +2874,9 @@ namespace librealsense
 
         v4l_mipi_device::v4l_mipi_device(const uvc_device_info& info, bool use_memory_map):
             v4l_uvc_meta_device(info,use_memory_map)
-        {}
+        {
+            printf("NKW v4l2_mipi_device constructor entry\n");
+        }
 
         v4l_mipi_device::~v4l_mipi_device()
         {}
@@ -2603,7 +2931,7 @@ namespace librealsense
                 if (errno == EIO || errno == EAGAIN) // TODO: Log?
                     return false;
 
-                throw linux_backend_exception("xioctl(VIDIOC_S_EXT_CTRLS) failed");
+                throw linux_backend_exception("set_pu ioctl(VIDIOC_S_EXT_CTRLS) failed");
             }
 
             return true;
@@ -2611,6 +2939,7 @@ namespace librealsense
 
         bool v4l_mipi_device::set_xu(const extension_unit& xu, uint8_t control, const uint8_t* data, int size)
         {
+            //throw linux_backend_exception("v4l_mipi_device::set_xu not implemented yet");
             v4l2_ext_control xctrl{xu_to_cid(xu,control), uint32_t(size), 0, 0};
             switch (size)
             {
@@ -2631,10 +2960,14 @@ namespace librealsense
             int retVal = xioctl(_fd, VIDIOC_S_EXT_CTRLS, &ctrls_block);
             if (retVal < 0)
             {
-                if (errno == EIO || errno == EAGAIN) // TODO: Log?
-                    return false;
+                retVal = xioctl(_sub_fd, VIDIOC_S_EXT_CTRLS, &ctrls_block);
+                if (retVal < 0)
+                {
+                    if (errno == EIO || errno == EAGAIN) // TODO: Log?
+                        return false;
 
-                throw linux_backend_exception("xioctl(VIDIOC_S_EXT_CTRLS) failed");
+                    throw linux_backend_exception("set_xu xioctl(VIDIOC_S_EXT_CTRLS) failed");
+                }
             }
             return true;
         }
@@ -2654,8 +2987,12 @@ namespace librealsense
                 int ret = xioctl(_fd, VIDIOC_G_EXT_CTRLS, &ext);
                 if (ret < 0)
                 {
-                    // exception is thrown if the ioctl fails twice
-                    continue;
+                    ret = xioctl(_sub_fd, VIDIOC_G_EXT_CTRLS, &ext);
+                    if (ret < 0)
+                    {
+                        // exception is thrown if the ioctl fails twice
+                        continue;
+                    }
                 }
 
                 if (control == RS_ENABLE_AUTO_EXPOSURE)
@@ -2680,8 +3017,9 @@ namespace librealsense
             v4l2_query_ext_ctrl xctrl_query{};
             xctrl_query.id = xu_to_cid(xu,control);
 
-            if(0 > ioctl(_fd,VIDIOC_QUERY_EXT_CTRL,&xctrl_query)){
-                throw linux_backend_exception(rsutils::string::from() << "xioctl(VIDIOC_QUERY_EXT_CTRL) failed, errno=" << errno);
+            if(0 > ioctl(_fd, VIDIOC_QUERY_EXT_CTRL, &xctrl_query)){
+                if (0 > ioctl(_sub_fd, VIDIOC_QUERY_EXT_CTRL, &xctrl_query))
+                    throw linux_backend_exception(rsutils::string::from() << "xioctl(VIDIOC_QUERY_EXT_CTRL) failed, errno=" << errno);
             }
 
             if ((xctrl_query.elems !=1 ) ||
@@ -2758,6 +3096,7 @@ namespace librealsense
 
         std::shared_ptr<uvc_device> v4l_backend::create_uvc_device(uvc_device_info info) const
         {
+            printf("NKW v4l2_backend::%s %d enter\n", __FUNCTION__, __LINE__);
             bool mipi_device = 0xABCD == info.pid; // D457 development. Not for upstream
             auto v4l_uvc_dev =        mipi_device ?         std::make_shared<v4l_mipi_device>(info) :
                               ((!info.has_metadata_node) ?  std::make_shared<v4l_uvc_device>(info) :
@@ -2768,6 +3107,7 @@ namespace librealsense
 
         std::vector<uvc_device_info> v4l_backend::query_uvc_devices() const
         {
+            printf("NKW v4l_backend:%s %d enter\n", __FUNCTION__, __LINE__);
             std::vector<uvc_device_info> uvc_nodes;
             v4l_uvc_device::foreach_uvc_device(
             [&uvc_nodes](const uvc_device_info& i, const std::string&)
@@ -2822,6 +3162,7 @@ namespace librealsense
 
         void v4l2_video_md_syncer::push_video(const sync_buffer& video_buffer)
         {
+            printf("NKW %s %d video_md_syncer - push_video called\n", __FUNCTION__, __LINE__);
             std::lock_guard<std::mutex> lock(_syncer_mutex);
             if(!_is_ready)
             {
@@ -2875,14 +3216,16 @@ namespace librealsense
                 LOG_DEBUG_V4L("video_md_syncer - pull_video_with_metadata called but syncer not ready");
                 return false;
             }
-            if (_video_queue.empty())
+            if (_video_queue.empty()) // entered here
             {
+                printf("NKW %s %d video_md_syncer - video queue is empty\n", __FUNCTION__, __LINE__);
                 LOG_DEBUG_V4L("video_md_syncer - video queue is empty");
                 return false;
             }
 
             if (_md_queue.empty())
             {
+                printf("NKW %s %d video_md_syncer - md queue is empty\n", __FUNCTION__, __LINE__);
                 LOG_DEBUG_V4L("video_md_syncer - md queue is empty");
                 return false;
             }
@@ -2893,6 +3236,8 @@ namespace librealsense
             // set video and md file descriptors
             video_fd = video_candidate._fd;
             md_fd = md_candidate._fd;
+            printf("NKW %s %d video_md_syncer - video candidate seq %u, md candidate seq %u\n", __FUNCTION__, __LINE__,
+                   video_candidate._v4l2_buf->sequence, md_candidate._v4l2_buf->sequence);
 
             // sync is ok if latest video and md have the same sequence
             if (video_candidate._v4l2_buf->sequence == md_candidate._v4l2_buf->sequence)
@@ -2902,15 +3247,18 @@ namespace librealsense
                 // removing from queues
                 _video_queue.pop();
                 _md_queue.pop();
+                printf("NKW %s %d video_md_syncer - video and md pulled with sequence %u\n", __FUNCTION__, __LINE__, video_candidate._v4l2_buf->sequence);
                 LOG_DEBUG_V4L("video_md_syncer - video and md pulled with sequence " << video_candidate._v4l2_buf->sequence);
                 return true;
             }
 
+            printf("NKW %s %d video_md_syncer - no sync between video and md\n", __FUNCTION__, __LINE__);
             LOG_DEBUG_V4L("video_md_syncer - video_candidate seq " << video_candidate._v4l2_buf->sequence << ", md_candidate seq " << md_candidate._v4l2_buf->sequence);
 
             if (video_candidate._v4l2_buf->sequence > md_candidate._v4l2_buf->sequence && _md_queue.size() > 1)
             {
                 // Enqueue of md buffer before throwing its content away
+                printf("NKW %s %d video_md_syncer - enqueue md buf %u before dropping it\n", __FUNCTION__, __LINE__, md_candidate._buffer_index);
                 enqueue_buffer_before_throwing_it(md_candidate);
                 _md_queue.pop();
 
@@ -2924,6 +3272,7 @@ namespace librealsense
                     // removing from queues
                     _video_queue.pop();
                     _md_queue.pop();
+                    printf("NKW %s %d video_md_syncer - video and md pulled with sequence %u\n", __FUNCTION__, __LINE__, video_candidate._v4l2_buf->sequence);
                     LOG_DEBUG_V4L("video_md_syncer - video and md pulled with sequence " << video_candidate._v4l2_buf->sequence);
                     return true;
                 }
@@ -2931,6 +3280,7 @@ namespace librealsense
             if (video_candidate._v4l2_buf->sequence < md_candidate._v4l2_buf->sequence && _video_queue.size() > 1)
             {
                 // Enqueue of md buffer before throwing its content away
+                printf("NKW %s %d video_md_syncer - enqueue video buf %u before dropping it\n", __FUNCTION__, __LINE__, video_candidate._buffer_index);
                 enqueue_buffer_before_throwing_it(video_candidate);
                 _video_queue.pop();
 
@@ -2944,10 +3294,12 @@ namespace librealsense
                     // removing from queues
                     _video_queue.pop();
                     _md_queue.pop();
+                    printf("NKW %s %d video_md_syncer - video and md pulled with sequence %u\n", __FUNCTION__, __LINE__, md_candidate._v4l2_buf->sequence);
                     LOG_DEBUG_V4L("video_md_syncer - video and md pulled with sequence " << md_candidate._v4l2_buf->sequence);
                     return true;
                 }
             }
+            printf("NKW %s %d video_md_syncer - unable to sync video and md\n", __FUNCTION__, __LINE__);
             return false;
         }
 

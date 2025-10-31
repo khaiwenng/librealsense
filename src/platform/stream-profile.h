@@ -11,14 +11,14 @@ namespace librealsense {
 namespace platform {
 
 
-typedef std::tuple< uint32_t, uint32_t, uint32_t, uint32_t > stream_profile_tuple;
+typedef std::tuple< uint32_t, uint32_t, float, uint32_t > stream_profile_tuple;
 
 
 struct stream_profile
 {
     uint32_t width;
     uint32_t height;
-    uint32_t fps;
+    float fps;
     uint32_t format;
 
     operator stream_profile_tuple() const { return std::make_tuple( width, height, fps, format ); }

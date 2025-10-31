@@ -33,6 +33,7 @@ uvc_sensor::uvc_sensor( std::string const & name,
     , _user_count( 0 )
     , _timestamp_reader( std::move( timestamp_reader ) )
 {
+    printf("NKW uvc_sensor constructor called for device %s\n", name.c_str());
     register_metadata( RS2_FRAME_METADATA_BACKEND_TIMESTAMP,
                        make_additional_data_parser( &frame_additional_data::backend_timestamp ) );
     register_metadata( RS2_FRAME_METADATA_RAW_FRAME_SIZE,
@@ -93,12 +94,14 @@ void uvc_sensor::verify_supported_requests( const stream_profiles & requests ) c
 
 void uvc_sensor::open( const stream_profiles & requests )
 {
+    printf("NKW uvc_sensor::%s %d opening streams\n", __FUNCTION__, __LINE__);
     std::lock_guard< std::mutex > lock( _configure_lock );
     if( _is_streaming )
         throw wrong_api_call_sequence_exception( "open(...) failed. UVC device is streaming!" );
     else if( _is_opened )
         throw wrong_api_call_sequence_exception( "open(...) failed. UVC device is already opened!" );
 
+    printf("NKW uvc_sensor::%s %d preparing to open streams\n", __FUNCTION__, __LINE__);
     auto on = std::unique_ptr< power >( new power( std::dynamic_pointer_cast< uvc_sensor >( shared_from_this() ) ) );
 
     _source.init( _metadata_parsers );
@@ -115,6 +118,8 @@ void uvc_sensor::open( const stream_profiles & requests )
         {
             unsigned long long last_frame_number = 0;
             rs2_time_t last_timestamp = 0;
+            printf("NKW uvc_sensor::%s %d probing and committing profile\n", __FUNCTION__, __LINE__);
+            printf("NKW uvc_sensor::%s %d profile fps: %d\n", __FUNCTION__, __LINE__, req_profile->get_framerate());
             _device->probe_and_commit(
                 req_profile_base->get_backend_profile(),
                 [this, req_profile_base, req_profile, last_frame_number, last_timestamp](
@@ -122,16 +127,19 @@ void uvc_sensor::open( const stream_profiles & requests )
                     platform::frame_object f,
                     std::function< void() > continuation ) mutable
                 {
+                    printf("NKW uvc_sensor::%s %d\n", __FUNCTION__, __LINE__);
                     const auto system_time = time_service::get_time();  // time frame was received from the backend
 
                     if( ! this->is_streaming() )
                     {
+                        printf("NKW uvc_sensor::%s %d frame received but streaming inactive\n", __FUNCTION__, __LINE__);
                         LOG_WARNING( "Frame received with streaming inactive,"
                                      << librealsense::get_string( req_profile_base->get_stream_type() )
                                      << req_profile_base->get_stream_index() << ", Arrived," << std::fixed
                                      << f.backend_time << " " << system_time );
                         return;
                     }
+                    printf("NKW uvc_sensor::%s %d\n", __FUNCTION__, __LINE__);
 
                     const auto && fr = generate_frame_from_data( f,
                                                                  system_time,
@@ -143,7 +151,7 @@ void uvc_sensor::open( const stream_profiles & requests )
                     auto bpp = get_image_bpp( req_profile_base->get_format() );
                     auto && frame_counter = fr->additional_data.frame_number;
                     auto && timestamp = fr->additional_data.timestamp;
-
+                    printf("NKW uvc_sensor::%s %d bpp= %d, frame_counter=%llu, timestamp=%f\n", __FUNCTION__, __LINE__, bpp, frame_counter, timestamp);
                     // D457 development
                     size_t expected_size;
                     auto && msp = As< motion_stream_profile, stream_profile_interface >( req_profile );
@@ -169,6 +177,7 @@ void uvc_sensor::open( const stream_profiles & requests )
                     int width = vsp ? vsp->get_width() : 0;
                     int height = vsp ? vsp->get_height() : 0;
 
+                    printf("NKW uvc_sensor::%s %d width= %d, height= %d\n", __FUNCTION__, __LINE__, width, height);
                     assert( ( width * height ) % 8 == 0 );
 
                     // TODO: remove when adding confidence format
@@ -192,6 +201,7 @@ void uvc_sensor::open( const stream_profiles & requests )
                     if( diff > 10 )
                         LOG_DEBUG( "!! Frame allocation took " << diff << " msec" );
 
+                    printf("NKW uvc_sensor::%s %d copying frame data\n", __FUNCTION__, __LINE__);
                     if( fh.frame )
                     {
                         // method should be limited to use of MIPI - not for USB
@@ -231,6 +241,7 @@ void uvc_sensor::open( const stream_profiles & requests )
                             LOG_DEBUG("!! Frame memcpy took " << diff << " msec");
                     }
 
+                    printf("NKW uvc_sensor::%s %d invoking callback\n", __FUNCTION__, __LINE__);
                     // calling the continuation method, and releasing the backend frame buffer
                     // since the content of the OS frame buffer has been copied, it can released ASAP
                     continuation();
@@ -240,14 +251,14 @@ void uvc_sensor::open( const stream_profiles & requests )
                         LOG_INFO("Dropped frame. alloc_frame(...) returned nullptr");
                         return;
                     }
-
+                    printf("NKW uvc_sensor::%s %d processing frame\n", __FUNCTION__, __LINE__);
                     if( fh->get_stream().get() )
                     {
                         // Gather info for logging the callback ended
                         auto fps = fh->get_stream()->get_framerate();
                         auto stream_type = fh->get_stream()->get_stream_type();
                         auto frame_number = fh->get_frame_number();
-
+                        printf("NKW uvc_sensor::%s %d fps= %d, stream_type= %d, frame_number= %llu\n", __FUNCTION__, __LINE__, fps, stream_type, frame_number);
                         // Invoke first callback
                         auto callback_start_time = time_service::get_time();
                         auto callback = fh->get_owner()->begin_callback();
@@ -256,6 +267,7 @@ void uvc_sensor::open( const stream_profiles & requests )
                         // Log callback ended
                         log_callback_end( fps, callback_start_time, time_service::get_time(), stream_type, frame_number );
                     }
+                    printf("NKW uvc_sensor::%s %d done processing frame\n", __FUNCTION__, __LINE__);
                 } );
         }
         catch( ... )
@@ -268,7 +280,7 @@ void uvc_sensor::open( const stream_profiles & requests )
         }
         commited.push_back( req_profile_base->get_backend_profile() );
     }
-
+    printf("NKW uvc_sensor::%s %d all profiles committed successfully\n", __FUNCTION__, __LINE__);
     _internal_config = commited;
 
     if( _on_open )
@@ -279,10 +291,13 @@ void uvc_sensor::open( const stream_profiles & requests )
 
     try
     {
+        printf("NKW uvc_sensor::%s %d starting stream_on\n", __FUNCTION__, __LINE__);
         _device->stream_on( [&]( const notification & n ) { _notifications_processor->raise_notification( n ); } );
+        printf("NKW uvc_sensor::%s %d stream_on completed successfully\n", __FUNCTION__, __LINE__);//failed here
     }
     catch( ... )
     {
+        printf("NKW uvc_sensor::%s %d stream_on failed, closing profiles\n", __FUNCTION__, __LINE__);
         std::stringstream error_msg;
         error_msg << "\tFormats: \n";
         for( auto && profile : _internal_config )
@@ -450,16 +465,21 @@ stream_profiles uvc_sensor::init_stream_profiles()
     std::unordered_set< std::shared_ptr< motion_stream_profile > > motion_profiles;
     power on( std::dynamic_pointer_cast< uvc_sensor >( shared_from_this() ) );
 
+    printf("NKW %s call _device->get_profiles()\n", __FUNCTION__);
     auto uvc_profiles = _device->get_profiles();
+    printf("NKW %s uvc_profiles.size()=%zu\n", __FUNCTION__, uvc_profiles.size());//still have 
     for( auto && p : uvc_profiles )
     {
+        printf("NKW %s %d processing profile with fourcc=0x%X, width=%d, height=%d, fps=%f\n", __FUNCTION__, __LINE__, p.format, p.width, p.height, p.fps);
         const auto && rs2_fmt = fourcc_to_rs2_format( p.format );
         if( rs2_fmt == RS2_FORMAT_ANY )
             continue;
 
+        printf("NKW %s %d rs2_fmt=0x%X\n", __FUNCTION__, __LINE__, rs2_fmt);
         // D457 development
         if( rs2_fmt == RS2_FORMAT_MOTION_XYZ32F )
         {
+            printf("NKW %s %d motion profile detected\n", __FUNCTION__, __LINE__);
             auto profile = std::make_shared< platform::stream_profile_impl< motion_stream_profile > >( p );
             if( ! profile )
                 throw librealsense::invalid_value_exception( "null pointer passed for argument \"profile\"." );
@@ -472,21 +492,26 @@ stream_profiles uvc_sensor::init_stream_profiles()
         }
         else
         {
+            //printf("NKW %s %d video profile detected\n", __FUNCTION__, __LINE__);
             auto profile = std::make_shared< platform::stream_profile_impl< video_stream_profile > >( p );
             if( ! profile )
                 throw librealsense::invalid_value_exception( "null pointer passed for argument \"profile\"." );
 
+            printf("NKW %s video profile created with width=%d, height=%d, fourcc=0x%X, rs2_fmt=0x%X fps=%f\n", __FUNCTION__, p.width, p.height, p.format, rs2_fmt, p.fps);
             profile->set_dims( p.width, p.height );
             profile->set_stream_type( fourcc_to_rs2_stream( p.format ) );
             profile->set_stream_index( 0 );
             profile->set_format( rs2_fmt );
             profile->set_framerate( p.fps );
+            printf("NKW %s %d profile fps: %d\n", __FUNCTION__, __LINE__, profile->get_framerate());
             video_profiles.insert( profile );
         }
     }
 
     stream_profiles result{ video_profiles.begin(), video_profiles.end() };
     result.insert( result.end(), motion_profiles.begin(), motion_profiles.end() );
+
+    printf("NKW %s %d returning %zu profiles\n", __FUNCTION__, __LINE__, result.size());
     return result;
 }
 

@@ -78,6 +78,7 @@ namespace librealsense
         {rs_fourcc('Y','1','6',' '), RS2_STREAM_INFRARED},
         {rs_fourcc('Y','1','2','I'), RS2_STREAM_INFRARED},
         {rs_fourcc('R','G','B','2'), RS2_STREAM_INFRARED},
+        //{rs_fourcc('U','Y','V','Y'), RS2_STREAM_DEPTH}, //NKW TEST HACK
         {rs_fourcc('Z','1','6',' '), RS2_STREAM_DEPTH},
         {rs_fourcc('Z','1','6','H'), RS2_STREAM_DEPTH},
         {rs_fourcc('B','Y','R','2'), RS2_STREAM_COLOR},
@@ -234,6 +235,7 @@ namespace librealsense
         */
         stream_profiles init_stream_profiles() override
         {
+            printf("NKW d400-devices %s %d call init stream profiles\n", __FUNCTION__, __LINE__);
             auto lock = environment::get_instance().get_extrinsics_graph().lock();
 
             auto&& results = synthetic_sensor::init_stream_profiles();
@@ -471,10 +473,12 @@ namespace librealsense
         const std::vector<platform::uvc_device_info>& all_device_infos)
     {
         using namespace ds;
-
+        printf("NKW %s %d call create_depth_device\n", __FUNCTION__, __LINE__);
         std::vector<std::shared_ptr<platform::uvc_device>> depth_devices;
         for (auto&& info : filter_by_mi(all_device_infos, 0)) // Filter just mi=0, DEPTH
             depth_devices.push_back( get_backend()->create_uvc_device( info ) );
+
+        printf("NKW %s %d after create uvc device\n", __FUNCTION__, __LINE__);
 
         std::unique_ptr< frame_timestamp_reader > timestamp_reader_backup( new ds_timestamp_reader() );
         frame_timestamp_reader* timestamp_reader_from_metadata;
@@ -485,6 +489,8 @@ namespace librealsense
         
         std::unique_ptr<frame_timestamp_reader> timestamp_reader_metadata(timestamp_reader_from_metadata);
         auto enable_global_time_option = std::shared_ptr<global_time_option>(new global_time_option());
+
+        printf("NKW %s %d before make uvc sensor\n", __FUNCTION__, __LINE__);
 
         auto raw_depth_ep = std::make_shared<uvc_sensor>("Raw Depth Sensor", std::make_shared<platform::multi_pins_uvc_device>(depth_devices),
             std::unique_ptr<frame_timestamp_reader>(new global_timestamp_reader(std::move(timestamp_reader_metadata), _tf_keeper, enable_global_time_option)), this);
@@ -515,6 +521,7 @@ namespace librealsense
           _right_ir_stream(new stream(RS2_STREAM_INFRARED, 2)),
           _color_stream(nullptr)
     {
+        printf("NKW d400_device::%s %d \n", __FUNCTION__, __LINE__);
         _depth_device_idx = add_sensor( create_depth_device( dev_info->get_context(), dev_info->get_group().uvc_devices ) );
         init( dev_info->get_context(), dev_info->get_group() );
     }
@@ -523,7 +530,6 @@ namespace librealsense
         const platform::backend_device_group& group)
     {
         using namespace ds;
-
         auto raw_sensor = get_raw_depth_sensor();
         _pid = group.uvc_devices.front().pid;
         // to be changed for D457

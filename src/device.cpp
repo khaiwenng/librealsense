@@ -185,13 +185,16 @@ std::vector<rs2_format> device::map_supported_color_formats(rs2_format source_fo
     switch (source_format)
     {
     case RS2_FORMAT_YUYV:
+        printf("NKW %s %d source RS2_FORMAT_YUYV to target RS2_FORMAT_YUYV RS2_FORMAT_Y8 \n", __FUNCTION__, __LINE__);
         target_formats.push_back(RS2_FORMAT_YUYV);
         target_formats.push_back(RS2_FORMAT_Y8);
         break;
     case RS2_FORMAT_UYVY:
+        printf("NKW %s %d source RS2_FORMAT_UYVY to target RS2_FORMAT_UYVY \n", __FUNCTION__, __LINE__);
         target_formats.push_back(RS2_FORMAT_UYVY);
         break;
     default:
+        printf("NKW %s %d unsupported format: 0x%X\n", __FUNCTION__, __LINE__, source_format);
         LOG_ERROR("Format is not supported for mapping");
     }
     return target_formats;
@@ -222,22 +225,56 @@ void device::tag_profiles(stream_profiles profiles) const
         {
             if (auto vp = dynamic_cast<video_stream_profile_interface*>(profile.get()))
             {
+                printf("NKW %s %d checking tag %d for video profile: stream=%d format=0x%X width=%d height=%d fps=%d stream_index=%d\n",
+                       __FUNCTION__, __LINE__,
+                       tag.tag,
+                       vp->get_stream_type(),
+                       vp->get_format(),
+                       vp->get_width(),
+                       vp->get_height(),
+                       vp->get_framerate(),
+                       vp->get_stream_index());
+                printf("NKW %s %d tag criteria: stream=%d format=0x%X width=%d height=%d fps=%d stream_index=%d\n",
+                       __FUNCTION__, __LINE__,
+                       tag.stream,
+                       tag.format,
+                       tag.width,
+                       tag.height,
+                       tag.fps,
+                       tag.stream_index);
                 if ((tag.stream == RS2_STREAM_ANY || vp->get_stream_type() == tag.stream) &&
                     (tag.format == RS2_FORMAT_ANY || vp->get_format() == tag.format) &&
                     (tag.width == -1 || vp->get_width() == tag.width) &&
                     (tag.height == -1 || vp->get_height() == tag.height) &&
                     (tag.fps == -1 || vp->get_framerate() == tag.fps) &&
-                    (tag.stream_index == -1 || vp->get_stream_index() == tag.stream_index))
-                    profile->tag_profile(tag.tag);
+                    (tag.stream_index == -1 || vp->get_stream_index() == tag.stream_index)) {
+                        printf("NKW %s %d found profile!\n", __FUNCTION__, __LINE__);
+                        profile->tag_profile(tag.tag);
+                    }
             }
             else
             if (auto mp = dynamic_cast<motion_stream_profile_interface*>(profile.get()))
             {
+                printf("NKW %s %d checking tag %d for motion profile: stream=%d format=0x%X fps=%d stream_index=%d\n",
+                       __FUNCTION__, __LINE__,
+                       tag.tag,
+                       mp->get_stream_type(),
+                       mp->get_format(),
+                       mp->get_framerate(),
+                       mp->get_stream_index());
+                printf("NKW %s %d tag criteria: stream=%d format=0x%X fps=%d stream_index=%d\n",
+                       __FUNCTION__, __LINE__,
+                       tag.stream,
+                       tag.format,
+                       tag.fps,
+                       tag.stream_index);
                 if ((tag.stream == RS2_STREAM_ANY || mp->get_stream_type() == tag.stream) &&
                     (tag.format == RS2_FORMAT_ANY || mp->get_format() == tag.format) &&
                     (tag.fps == -1 || mp->get_framerate() == tag.fps) &&
-                    (tag.stream_index == -1 || mp->get_stream_index() == tag.stream_index))
+                    (tag.stream_index == -1 || mp->get_stream_index() == tag.stream_index)) {
+                    printf("NKW %s %d found profile!\n", __FUNCTION__, __LINE__);
                     profile->tag_profile(tag.tag);
+                }
             }
         }
     }

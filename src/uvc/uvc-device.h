@@ -66,6 +66,7 @@ namespace librealsense
             virtual void unlock() const override;
 
             virtual std::string get_device_location() const override;
+            virtual std::string get_subdevice_location() const override;
             virtual usb_spec  get_usb_specification() const override;
 
             bool is_platform_jetson() const override { return false;}
@@ -100,6 +101,7 @@ namespace librealsense
             std::vector<profile_and_callback>       _streams;
 
             std::string                             _location;
+            std::string                             _sub_location;
             std::vector<stream_profile>             _profiles;
             std::vector<frame_callback>             _frame_callbacks;
 

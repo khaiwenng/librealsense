@@ -116,7 +116,6 @@ namespace librealsense
                 device_info.serial = this->get_device_serial(info.vid, info.pid, info.unique_id);
                 devices.push_back(device_info);
             };
-
             wmf_uvc_device::foreach_uvc_device(action);
 
             return devices;
