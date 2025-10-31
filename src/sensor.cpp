@@ -66,11 +66,8 @@ void log_callback_end( uint32_t fps,
     , _profiles(
           [this]()
           {
-            printf("NKW %s %d call init stream profiles\n", __FUNCTION__, __LINE__);
               auto profiles = this->init_stream_profiles();
               _owner->tag_profiles( profiles );
-              printf("NKW %s %d finished init stream profiles\n", __FUNCTION__, __LINE__);
-              printf("NKW %s %d sensor has %zu stream profiles\n", __FUNCTION__, __LINE__, profiles.size());
               return profiles;
           } )
     {
@@ -220,28 +217,22 @@ void log_callback_end( uint32_t fps,
         bool const need_debug = (tag & profile_tag::PROFILE_TAG_DEBUG) != 0;
         bool const need_any = (tag & profile_tag::PROFILE_TAG_ANY) != 0;
 
-        printf("NKW %s %d need_debug=%d, need_any=%d\n", __FUNCTION__, __LINE__, need_debug, need_any);
         auto & all_profiles = initialized_profiles();
-        printf("NKW %s %d all_profiles.size()=%zu\n", __FUNCTION__, __LINE__, all_profiles.size()); // already 0 for VTG
         if( need_debug && need_any )
             return all_profiles;
 
         stream_profiles results;
         for( auto p : all_profiles )
         {
-            //printf("NKW %s %d checking profile with tag=%d\n", __FUNCTION__, __LINE__, p->get_tag());
             auto curr_tag = p->get_tag();
             if( ! need_debug && ( curr_tag & profile_tag::PROFILE_TAG_DEBUG ) )
                 continue;
 
             if( curr_tag & tag || need_any )
             {
-                if (curr_tag & tag)
-                    printf("NKW %s %d adding profile with tag=%d\n", __FUNCTION__, __LINE__, p->get_tag());
                 results.push_back( p );
             }
         }
-        printf("NKW %s %d returning %zu profiles\n", __FUNCTION__, __LINE__, results.size());
         return results;
     }
 
@@ -412,7 +403,6 @@ void log_callback_end( uint32_t fps,
         , _raw_sensor( raw_sensor )
         , _options_watcher( _raw_sensor )
     {
-        printf("NKW synthetic_sensor constructor called for %s\n", name.c_str());
         rsutils::json const & settings = device->get_context()->get_settings();
         if( auto interval_j = settings.nested( std::string( "options-update-interval", 23 ) ) )
         {
@@ -420,10 +410,8 @@ void log_callback_end( uint32_t fps,
             _options_watcher.set_update_interval( std::chrono::milliseconds( interval ) );
         }
 
-        printf("NKW %s %d synthetic sensor created\n", __FUNCTION__, __LINE__);
         // synthetic sensor and its raw sensor will share the formats and streams mapping
 
-        printf("NKW %s %d setting fourcc to rs2 format map\n", __FUNCTION__, __LINE__);
         auto& raw_fourcc_to_rs2_format_map = _raw_sensor->get_fourcc_to_rs2_format_map();
         raw_fourcc_to_rs2_format_map = std::make_shared<std::map<uint32_t, rs2_format>>(fourcc_to_rs2_format_map);
 
@@ -572,21 +560,17 @@ void log_callback_end( uint32_t fps,
 
     stream_profiles synthetic_sensor::init_stream_profiles()
     {
-        printf("NKW synthetic_sensor::%s %d call get_raw_stream_profiles\n", __FUNCTION__, __LINE__);
         stream_profiles result_profiles;
         switch( get_format_conversion() )
         {
         case format_conversion::basic:
-            printf("NKW %s drop non basic formats\n", __FUNCTION__);
             _formats_converter.drop_non_basic_formats();
             // fall-thru
         case format_conversion::full:
-            printf("NKW %s call get_all_possible_profiles\n", __FUNCTION__);
             result_profiles = _formats_converter.get_all_possible_profiles( get_raw_stream_profiles() );
             break;
 
         case format_conversion::raw:
-            printf("NKW %s call get_raw_stream_profiles\n", __FUNCTION__);
             result_profiles = get_raw_stream_profiles();
             // NOTE: this is not meant for actual streaming at this time -- actual behavior of the
             // formats_converter has not been implemented!
@@ -601,16 +585,13 @@ void log_callback_end( uint32_t fps,
 
     void synthetic_sensor::open(const stream_profiles & requests)
     {
-        printf("NKW synthetic_sensor::%s %d opening streams\n", __FUNCTION__, __LINE__);
         if( get_format_conversion() == format_conversion::raw )
             throw wrong_api_call_sequence_exception( "'raw' format-conversion is not meant for streaming" );
 
         std::lock_guard<std::mutex> lock(_synthetic_configure_lock);
 
-        printf("NKW synthetic_sensor::%s %d prepare to convert\n", __FUNCTION__, __LINE__);
         _formats_converter.prepare_to_convert( requests );
 
-        printf("NKW synthetic_sensor::%s %d get active source profiles\n", __FUNCTION__, __LINE__);
         const auto & resolved_req = _formats_converter.get_active_source_profiles();
         std::vector< std::shared_ptr< processing_block > > active_pbs = _formats_converter.get_active_converters();
         for( auto & pb : active_pbs )
@@ -619,26 +600,21 @@ void log_callback_end( uint32_t fps,
         _raw_sensor->set_source_owner(this);
         try
         {
-            printf("NKW synthetic_sensor::%s %d calling raw_sensor->open\n", __FUNCTION__, __LINE__);
             _raw_sensor->open( resolved_req );
         }
         catch (const std::runtime_error& e)
         {
-            printf("NKW synthetic_sensor::%s %d caught exception from raw_sensor->open: %s \n", __FUNCTION__, __LINE__, e.what());
             // Throw a more informative exception
             std::stringstream requests_info;
             for (auto&& r : requests)
             {
-                printf("NKW synthetic_sensor::%s %d processing requested profile\n", __FUNCTION__, __LINE__);
                 auto p = to_profile(r.get());
-                printf("NKW synthetic_sensor::%s %d got profile: stream=%d, format=%x, %s, width=%d, height=%d\n", __FUNCTION__, __LINE__, p.stream, p.format, std::string(rs2_format_to_string(p.format)).c_str(), p.width, p.height);
                 requests_info << "\tFormat: " + std::string(rs2_format_to_string(p.format)) << ", width: " << p.width << ", height: " << p.height << std::endl;
             }
             throw recoverable_exception("\nFailed to resolve the request: \n" + requests_info.str() + "\nInto:\n" + e.what(),
                 RS2_EXCEPTION_TYPE_INVALID_VALUE);
         }
 
-        printf("NKW synthetic_sensor::%s %d set active streams\n", __FUNCTION__, __LINE__);
         set_active_streams(requests);
     }
 

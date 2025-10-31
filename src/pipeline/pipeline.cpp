@@ -36,7 +36,6 @@ namespace librealsense
 
         std::shared_ptr<profile> pipeline::start(std::shared_ptr<config> conf, rs2_frame_callback_sptr callback)
         {
-            std::cout << "NKW pipeline::start enter here" << std::endl;
             std::lock_guard<std::mutex> lock(_mtx);
             if (_active_profile)
             {
@@ -44,7 +43,6 @@ namespace librealsense
             }
             _streams_callback = callback;
             unsafe_start(conf);
-            std::cout << "NKW pipeline::start unsafe_start done" << std::endl;
 
             return unsafe_get_active_profile();
         }
@@ -60,13 +58,11 @@ namespace librealsense
             if (!_active_profile)
                 throw librealsense::wrong_api_call_sequence_exception("get_active_profile() can only be called between a start() and a following stop()");
 
-            printf("NKW pipeline::%s %d returning active profile\n", __FUNCTION__, __LINE__);
             return _active_profile;
         }
 
         void pipeline::unsafe_start(std::shared_ptr<config> conf)
         {
-            printf("NKW %s enter here\n", __FUNCTION__);
             std::shared_ptr<profile> profile = nullptr;
             //first try to get the previously resolved profile (if exists)
             auto cached_profile = conf->get_cached_resolved_profile();
@@ -87,7 +83,6 @@ namespace librealsense
                     catch (...)
                     {
                         if (i == NUM_TIMES_TO_RETRY) {
-                            printf("NKW pipeline::%s failed to resolve profile\n", __FUNCTION__);
                             throw;
                         }
                     }
@@ -106,21 +101,16 @@ namespace librealsense
 
             if (auto playback = As<librealsense::playback_device>(dev))
             {
-                printf("NKW %s %d setting up playback stopped callback\n", __FUNCTION__, __LINE__);
                 _playback_stopped_token = playback->playback_status_changed.subscribe( [this, callbacks](rs2_playback_status status)
                 {
-                    printf("NKW %s %d playback status changed: %d\n", __FUNCTION__, __LINE__, status);
                     if (status == RS2_PLAYBACK_STATUS_STOPPED)
                     {
-                        printf("NKW %s %d playback stopped, restarting if repeat_playback is set\n", __FUNCTION__, __LINE__);
                         _dispatcher.invoke([this, callbacks](dispatcher::cancellable_timer t)
                         {
-                            printf("NKW %s %d inside dispatcher invoke after playback stopped\n", __FUNCTION__, __LINE__);
                             //If the pipeline holds a playback device, and it reached the end of file (stopped)
                             //Then we restart it
                             if (_active_profile && _prev_conf->get_repeat_playback())
                             {
-                                printf("NKW %s %d restarting playback\n", __FUNCTION__, __LINE__);
                                 _active_profile->_multistream.open();
                                 _active_profile->_multistream.start(callbacks);
                             }
@@ -128,15 +118,11 @@ namespace librealsense
                     }
                 } );
             }
-            printf("NKW pipeline::%s %d before starting dispatcher\n", __FUNCTION__, __LINE__);
             _dispatcher.start();
-            printf("NKW pipeline::%s %d before opening multistream\n", __FUNCTION__, __LINE__);
             profile->_multistream.open();
-            printf("NKW pipeline::%s %d before starting multistream\n", __FUNCTION__, __LINE__);
             profile->_multistream.start(callbacks);
             _active_profile = profile;
             _prev_conf = std::make_shared<config>(*conf);
-            printf("NKW pipeline::%s %d pipeline started successfully\n", __FUNCTION__, __LINE__);
         }
 
         void pipeline::stop()
@@ -238,7 +224,6 @@ namespace librealsense
 
         frame_holder pipeline::wait_for_frames(unsigned int timeout_ms)
         {
-            printf("NKW %s %d enter here\n", __FUNCTION__, __LINE__);
             std::lock_guard<std::mutex> lock(_mtx);
             if (!_active_profile)
             {
@@ -250,17 +235,13 @@ namespace librealsense
             }
 
             frame_holder f;
-            printf("NKW %s %d waiting for frames\n", __FUNCTION__, __LINE__);
             if (_aggregator->dequeue(&f, timeout_ms))
             {
-                printf("NKW %s %d frames arrived successfully\n", __FUNCTION__, __LINE__);
                 return f;
             }
-            printf("NKW %s %d\n",__FUNCTION__,__LINE__);
             //hub returns true even if device already reconnected
             if (!_hub->is_connected(*_active_profile->get_device()))
             {
-                printf("NKW %s %d device disconnected, trying to reconnect\n", __FUNCTION__, __LINE__);
                 try
                 {
                     auto prev_conf = _prev_conf;

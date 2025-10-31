@@ -171,20 +171,16 @@ backend_device_factory::~backend_device_factory()
 
 std::vector< std::shared_ptr< device_info > > backend_device_factory::query_devices( unsigned requested_mask ) const
 {
-    printf("NKW %s %d querying devices with mask 0x%08x\n", __FUNCTION__, __LINE__, requested_mask);
     auto ctx = get_context();
     if( ! ctx )
         return {};
-    printf("NKW %s %d have context\n", __FUNCTION__, __LINE__);
     if( ( requested_mask & RS2_PRODUCT_LINE_SW_ONLY ) || ( ctx->get_device_mask() & RS2_PRODUCT_LINE_SW_ONLY ) )
         return {};  // We don't carry any software devices
-    printf("NKW %s %d querying backend devices\n", __FUNCTION__, __LINE__);
     auto backend = _device_watcher->get_backend();
     platform::backend_device_group group( backend->query_uvc_devices(),
                                           backend->query_usb_devices(),
                                           backend->query_hid_devices() );
     auto devices = create_devices_from_group( group, requested_mask );
-    printf("NKW %s %d found %zu devices\n", __FUNCTION__, __LINE__, devices.size());
     return { devices.begin(), devices.end() };
 }
 

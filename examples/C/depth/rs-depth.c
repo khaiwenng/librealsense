@@ -82,7 +82,7 @@ int main()
     // The returned object should be released with rs2_delete_device_list(...)
     rs2_device_list* device_list = rs2_query_devices(ctx, &e);
     check_error(e);
-    printf("NKW");
+
     int dev_count = rs2_get_device_count(device_list, &e);
     check_error(e);
     printf("There are %d connected RealSense devices.\n", dev_count);

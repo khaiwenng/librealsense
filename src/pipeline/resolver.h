@@ -205,8 +205,6 @@ namespace librealsense
 
             void enable_stream(rs2_stream stream, int index, uint32_t width, uint32_t height, rs2_format format, uint32_t fps)
             {
-                printf("NKW %s %d enabling stream %d:%d %dx%d@%d format %d\n", __FUNCTION__, __LINE__,
-                       stream, index, width, height, fps, format); //--- IGNORE ---
                 _requests[{stream, index}] = stream_profile{ format, stream, index, width, height, fps };
                 require_all = true;
             }
@@ -268,25 +266,12 @@ namespace librealsense
 
             multistream resolve(device_interface* dev)
             {
-                printf("NKW multistream::%s %d util::config::resolve called\n", __FUNCTION__, __LINE__);
-
-                // Print all requested streams
-                printf("NKW %s %d Total requested streams: %zu\n", __FUNCTION__, __LINE__, _requests.size());
-                for (auto& kvp : _requests) {
-                    printf("NKW REQUESTED: stream=%d (%s), index=%d, format=%d (%s), %dx%d@%d\n",
-                        kvp.first.stream, rs2_stream_to_string(kvp.first.stream),
-                        kvp.first.index,
-                        kvp.second.format, rs2_format_to_string(kvp.second.format),
-                        kvp.second.width, kvp.second.height, kvp.second.fps);
-                } // NKW REQUESTED: stream=1 (Depth), index=0, format=1 (Z16), 640x0@30
                  auto mapping = map_streams(dev);
-                    printf("NKW multistream::%s %d\n", __FUNCTION__, __LINE__);
 
                 // If required, make sure we've succeeded at opening
                 // all the requested streams
                 if (require_all)
                 {
-                    printf("NKW multistream::%s %d checking all requested streams are satisfied\n", __FUNCTION__, __LINE__);
                     std::set<index_type> all_streams;
                     for (auto && kvp : mapping)
                         all_streams.insert({ kvp.second->get_stream_type(), kvp.second->get_stream_index() });
@@ -301,7 +286,6 @@ namespace librealsense
                             throw std::runtime_error("Config couldn't configure all streams");
                     }
                 }
-                printf("NKW multistream::%s %d\n", __FUNCTION__, __LINE__);
 
                 // Unpack the data returned by assign
                 std::map<int, stream_profiles> dev_to_profiles;
@@ -312,21 +296,17 @@ namespace librealsense
                 {
                     if (mapping.find(i) != mapping.end())
                     {
-                        printf("NKW multistream::%s %d found sensor %d\n", __FUNCTION__, __LINE__, i);
                         sensors_map[i] = &dev->get_sensor(i);
                     }
                 }
-                printf("NKW multistream::%s %d\n", __FUNCTION__, __LINE__);
 
                 for (auto && kvp : mapping) {
                     dev_to_profiles[kvp.first].push_back(kvp.second);
                     index_type idx{ kvp.second->get_stream_type(), kvp.second->get_stream_index() };
                     stream_to_profile[idx] = kvp.second;
-                    printf("NKW multistream::%s %d\n", __FUNCTION__, __LINE__);
                 }
 
                 // TODO: make sure it works
-                printf("NKW multistream::%s %d success\n", __FUNCTION__, __LINE__);// done
                 return multistream(std::move(sensors_map), std::move(stream_to_profile), std::move(dev_to_profiles));
             }
 
@@ -405,7 +385,6 @@ namespace librealsense
 
             stream_profiles map_sub_device(stream_profiles profiles,const device_interface* dev) const
             {
-                printf("NKW stream_profiles::%s %d entry\n", __FUNCTION__, __LINE__);
                 stream_profiles rv;
                 std::set<index_type> satisfied_streams;
                 try
@@ -415,12 +394,6 @@ namespace librealsense
                     // deal with explicit requests
                     for (auto && kvp : _requests)
                     {
-                        printf("NKW %s %d checking request: stream=%d (%s), index=%d, format=%d (%s), %dx%d@%d\n", 
-                            __FUNCTION__, __LINE__, 
-                            kvp.first.stream, rs2_stream_to_string(kvp.first.stream),
-                            kvp.first.index,
-                            kvp.second.format, rs2_format_to_string(kvp.second.format),
-                            kvp.second.width, kvp.second.height, kvp.second.fps);
                         if (satisfied_streams.count(kvp.first)) continue; // skip satisfied requests
 
                          // if any profile on the subdevice can supply this request, consider it satisfiable
@@ -430,7 +403,6 @@ namespace librealsense
                         });
                         if (it != end(profiles))
                         {
-                            printf("NKW %s %d request for stream %d:%d can be satisfied\n", __FUNCTION__, __LINE__, kvp.first.stream, kvp.first.index); //--- IGNORE ---
                             targets.push_back(kvp.second); // store that this request is going to this subdevice
                             satisfied_streams.insert(kvp.first); // mark stream as satisfied
                         }
@@ -457,14 +429,12 @@ namespace librealsense
                 {
                     LOG_ERROR(e.what());
                 }
-                printf("NKW %s %d exit\n", __FUNCTION__, __LINE__);
                 return rv;
             }
 
             std::multimap<int, std::shared_ptr<stream_profile_interface>> map_streams(const device_interface* dev) const
             {
                 std::multimap<int, std::shared_ptr<stream_profile_interface>> out;
-                printf("NKW multistream::%s %d entry\n", __FUNCTION__, __LINE__);
 
                 // Algorithm assumes get_adjacent_devices always
                 // returns the devices in the same order
@@ -481,8 +451,6 @@ namespace librealsense
                     for (auto p : profiles)
                         out.emplace((int)i, p);
                 }
-                printf("NKW %s %d Resolved %zu streams from %zu requests\n", __FUNCTION__, __LINE__, out.size(), _requests.size());
-                printf("NKW multistream::%s %d exit\n", __FUNCTION__, __LINE__);
 
                 if(_requests.size() != out.size())
                     throw std::runtime_error(std::string("Couldn't resolve requests"));

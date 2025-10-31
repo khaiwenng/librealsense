@@ -19,15 +19,11 @@ namespace librealsense
                 if (!dev)
                     throw librealsense::invalid_value_exception("Failed to create a profile, device is null");
 
-                // NKW not here
                 _dev = std::make_shared<record_device>(dev, std::make_shared<ros_writer>(to_file, dev->compress_while_record()));
             }
-            printf("NKW %s profile constructor called\n", __FUNCTION__);
             try {
                 _multistream = config.resolve(_dev.get());
-                printf("NKW %s %d multistream resolved\n", __FUNCTION__, __LINE__); // never reach here
             } catch (const std::exception& e) {
-                printf("NKW %s %d EXCEPTION in util::config::resolve: %s\n", __FUNCTION__, __LINE__, e.what());
                 throw;
             }
         }

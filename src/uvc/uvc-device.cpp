@@ -43,7 +43,6 @@ namespace librealsense
     {
         std::vector<uvc_device_info> query_uvc_devices_info()
         {
-            LOG_INFO("NKW %s",__func__);
             std::vector<platform::uvc_device_info> rv;
             auto usb_devices = platform::usb_enumerator::query_devices_info();
             for (auto&& info : usb_devices) 

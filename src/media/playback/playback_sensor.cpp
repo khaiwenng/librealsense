@@ -56,7 +56,6 @@ bool playback_sensor::streams_contains_one_frame_or_more()
 
 stream_profiles playback_sensor::get_stream_profiles(int tag) const
 {
-    printf("NKW playback_sensor::%s %d enter\n", __FUNCTION__, __LINE__);
     if (tag == profile_tag::PROFILE_TAG_ANY)
         return m_available_profiles;
 

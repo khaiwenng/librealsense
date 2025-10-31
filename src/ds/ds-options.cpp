@@ -37,7 +37,6 @@ namespace librealsense
         : uvc_xu_option(ep, ds::depth_xu, ds::DS5_DEPTH_EMITTER_ENABLED,
                         "Emitter select, 0-disable all emitters, 1-enable laser, 2-enable laser auto (opt), 3-enable LED (opt)")
     {
-        printf("NKW %s\n", get_description());
     }
 
     float asic_and_projector_temperature_options::query() const

@@ -333,7 +333,7 @@ namespace librealsense
             static void get_mipi_device_info(const std::string& dev_name,
                                              std::string& bus_info, std::string& card);
 
-            v4l_uvc_device(const uvc_device_info& info, bool use_memory_map = true);//NKW mmap
+            v4l_uvc_device(const uvc_device_info& info, bool use_memory_map = true);//NKW FIXME
 
             virtual ~v4l_uvc_device() override;
 
@@ -466,7 +466,7 @@ namespace librealsense
             void prepare_capture_buffers();
             virtual void acquire_metadata(buffers_mgr & buf_mgr,fd_set &fds, bool compressed_format=false);
             // checking if metadata is streamed
-            virtual inline bool is_metadata_streamed() const { printf("NKW %s _md_fd = %d\n", __FUNCTION__, _md_fd); return _md_fd > 0;}
+            virtual inline bool is_metadata_streamed() const { return _md_fd > 0;}
             virtual inline std::shared_ptr<buffer> get_md_buffer(__u32 index) const {return _md_buffers[index];}
             int _md_fd = -1;
             std::string _md_name = "";

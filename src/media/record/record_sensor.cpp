@@ -61,7 +61,6 @@ void librealsense::record_sensor::init()
 }
 stream_profiles record_sensor::get_stream_profiles(int tag) const
 {
-    printf("NKW record_sensor::%s %d enter\n", __FUNCTION__, __LINE__);
     return m_sensor.get_stream_profiles(tag);
 }
 
