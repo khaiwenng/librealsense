@@ -2090,7 +2090,8 @@ namespace librealsense
                 // YUV formats
                 case MEDIA_BUS_FMT_YUYV8_2X8:
                 case MEDIA_BUS_FMT_YUYV8_1X16:
-                    return V4L2_PIX_FMT_YUYV;
+                    //return V4L2_PIX_FMT_YUYV;
+                    return 0x59555956;
                 case MEDIA_BUS_FMT_UYVY8_2X8:
                 case MEDIA_BUS_FMT_UYVY8_1X16:
                     return V4L2_PIX_FMT_UYVY;
